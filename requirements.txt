@@ -1,0 +1,23 @@
+# Core
+python-telegram-bot
+python-dotenv
+pydantic
+pydantic-settings
+
+# Database
+sqlalchemy
+alembic
+
+# HTTP Client
+httpx
+
+# Logging
+structlog
+
+# Utilities
+python-dateutil
+
+# Testing
+pytest
+pytest-asyncio
+freezegun
