@@ -511,9 +511,23 @@ What do you do?"""
 
         # Process decision
         try:
+            logger.debug(
+                "calling_scenario_process_decision",
+                scenario_id=scenario['id'],
+                decision=decision
+            )
+
             outcome = await self.scenario_engine.process_decision(
                 scenario['id'],
                 decision
+            )
+
+            logger.debug(
+                "scenario_decision_processed",
+                outcome_type=type(outcome).__name__,
+                outcome_attrs=dir(outcome) if hasattr(outcome, '__dict__') else 'no __dict__',
+                has_scenario_id=hasattr(outcome, 'scenario_id'),
+                scenario_id_value=getattr(outcome, 'scenario_id', 'NO_ATTR') if hasattr(outcome, 'scenario_id') else 'NO_ATTR'
             )
 
             # Store outcome

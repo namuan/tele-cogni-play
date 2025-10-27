@@ -176,32 +176,80 @@ class ScenarioEngine:
             len(ai_response.get('options', [])) == 0
         )
 
-        outcome = ScenarioOutcome(
+        logger.debug(
+            "creating_scenario_outcome",
             scenario_id=scenario_id,
-            user_decision=decision,
-            ai_response=ai_response['response'],
-            narrative_update=ai_response['narrative'],
-            narrative_branch=branch_id,
-            impact_score=decision_quality,
-            decision_quality=decision_quality,
-            is_complete=should_conclude,
-            next_actions=ai_response.get('options', []),
-            turn_count=scenario['turn_count']
+            decision=decision,
+            should_conclude=should_conclude
         )
 
-        if should_conclude:
-            scenario['is_complete'] = True
-            outcome.conclusion = await self.get_scenario_conclusion(scenario_id)
+        try:
+            outcome = ScenarioOutcome(
+                scenario_id=scenario_id,
+                user_decision=decision,
+                ai_response=ai_response['response'],
+                narrative_update=ai_response['narrative'],
+                narrative_branch=branch_id,
+                impact_score=decision_quality,
+                decision_quality=decision_quality,
+                is_complete=should_conclude,
+                next_actions=ai_response.get('options', []),
+                turn_count=scenario['turn_count']
+            )
 
-        logger.info(
-            "decision_processed",
-            scenario_id=scenario_id,
-            turn=scenario['turn_count'],
-            quality=decision_quality,
-            is_complete=should_conclude
-        )
+            logger.debug(
+                "scenario_outcome_created",
+                outcome_type=type(outcome).__name__,
+                has_conclusion_attr=hasattr(outcome, 'conclusion'),
+                outcome_attrs=dir(outcome)
+            )
 
-        return outcome
+            if should_conclude:
+                scenario['is_complete'] = True
+                conclusion = await self.get_scenario_conclusion(scenario_id)
+                outcome.conclusion = conclusion
+
+                logger.debug(
+                    "conclusion_added_to_outcome",
+                    conclusion_type=type(conclusion).__name__,
+                    outcome_has_conclusion=hasattr(outcome, 'conclusion'),
+                    conclusion_value=outcome.conclusion
+                )
+
+            logger.info(
+                "decision_processed",
+                scenario_id=scenario_id,
+                turn=scenario['turn_count'],
+                quality=decision_quality,
+                is_complete=should_conclude
+            )
+
+            # Test attribute access before returning
+            test_attrs = [
+                outcome.scenario_id,
+                outcome.user_decision,
+                outcome.ai_response,
+                outcome.is_complete,
+                outcome.turn_count
+            ]
+
+            logger.debug(
+                "outcome_attribute_access_test_passed",
+                test_values=[type(v).__name__ for v in test_attrs]
+            )
+
+            return outcome
+
+        except Exception as e:
+            logger.error(
+                "scenario_outcome_creation_failed",
+                error=str(e),
+                error_type=type(e).__name__,
+                scenario_id=scenario_id,
+                decision=decision,
+                should_conclude=should_conclude
+            )
+            raise
 
     async def _evaluate_decision(
         self,

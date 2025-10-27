@@ -156,6 +156,7 @@ class ScenarioOutcome:
     is_complete: bool
     next_actions: Optional[List[str]]
     turn_count: int
+    conclusion: Optional[Dict[str, Any]] = None
 
 @dataclass
 class ProgressReport:
