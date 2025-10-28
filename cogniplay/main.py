@@ -11,6 +11,7 @@ from telegram.ext import (
     ContextTypes
 )
 from cogniplay.config.settings import Settings
+from cogniplay.config.logging_config import setup_comprehensive_logging, log_object_details
 from cogniplay.database.connection import DatabaseConnection
 from cogniplay.integrations.openrouter_client import OpenRouterClient, OpenRouterConfig
 from cogniplay.integrations.character_generator import CharacterGenerator
@@ -28,14 +29,8 @@ from cogniplay.data.repositories import (
     CharacterRepository
 )
 
-# Configure logging
-structlog.configure(
-    processors=[
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.add_log_level,
-        structlog.processors.JSONRenderer()
-    ]
-)
+# Set up comprehensive logging with file output and stack traces
+setup_comprehensive_logging(log_level="DEBUG", log_file="cogniplay_debug.log")
 logger = structlog.get_logger()
 
 # Conversation states
@@ -522,12 +517,24 @@ What do you do?"""
                 decision
             )
 
+            # Log comprehensive details about the outcome object
+            outcome_details = log_object_details(outcome, "outcome")
             logger.debug(
-                "scenario_decision_processed",
+                "scenario_decision_processed_detailed",
+                **outcome_details,
+                scenario_id=scenario['id'],
+                decision=decision
+            )
+
+            # Additional specific checks for the subscriptable issue
+            logger.debug(
+                "outcome_subscriptable_check",
                 outcome_type=type(outcome).__name__,
-                outcome_attrs=dir(outcome) if hasattr(outcome, '__dict__') else 'no __dict__',
-                has_scenario_id=hasattr(outcome, 'scenario_id'),
-                scenario_id_value=getattr(outcome, 'scenario_id', 'NO_ATTR') if hasattr(outcome, 'scenario_id') else 'NO_ATTR'
+                outcome_is_dict=isinstance(outcome, dict),
+                outcome_is_dataclass=hasattr(outcome, '__dataclass_fields__'),
+                has_next_actions_attr=hasattr(outcome, 'next_actions'),
+                next_actions_value=getattr(outcome, 'next_actions', 'NO_ATTR') if hasattr(outcome, 'next_actions') else 'NO_ATTR',
+                next_actions_type=type(getattr(outcome, 'next_actions', None)).__name__ if hasattr(outcome, 'next_actions') else 'NO_ATTR'
             )
 
             # Store outcome
@@ -569,11 +576,39 @@ What do you do?"""
             else:
                 # Continue scenario
                 keyboard = []
-                for i, action in enumerate(outcome['next_actions'][:3]):
-                    keyboard.append([InlineKeyboardButton(
-                        f"{i+1}. {action[:50]}...",
-                        callback_data=f"action_{i}"
-                    )])
+                
+                # Log before attempting subscript access
+                logger.debug(
+                    "before_next_actions_access",
+                    outcome_type=type(outcome).__name__,
+                    has_next_actions=hasattr(outcome, 'next_actions'),
+                    next_actions_value=getattr(outcome, 'next_actions', 'NO_ATTR') if hasattr(outcome, 'next_actions') else 'NO_ATTR'
+                )
+                
+                try:
+                    # Use attribute access instead of subscript access
+                    next_actions = outcome.next_actions if hasattr(outcome, 'next_actions') else []
+                    logger.debug(
+                        "next_actions_retrieved",
+                        next_actions_count=len(next_actions) if next_actions else 0,
+                        next_actions_type=type(next_actions).__name__
+                    )
+                    
+                    for i, action in enumerate(next_actions[:3]):
+                        keyboard.append([InlineKeyboardButton(
+                            f"{i+1}. {action[:50]}...",
+                            callback_data=f"action_{i}"
+                        )])
+                except Exception as e:
+                    logger.error(
+                        "next_actions_access_failed",
+                        error=str(e),
+                        error_type=type(e).__name__,
+                        outcome_details=log_object_details(outcome, "outcome_error")
+                    )
+                    # Fallback: create empty actions list
+                    next_actions = []
+                
                 keyboard.append([InlineKeyboardButton("✍️ Custom Action", callback_data='custom_action')])
                 keyboard.append([InlineKeyboardButton("🛑 End Scenario", callback_data='end_scenario')])
 
@@ -624,6 +659,15 @@ What do you do?"""
                 custom_action
             )
 
+            # Log comprehensive details about the outcome object
+            outcome_details = log_object_details(outcome, "custom_action_outcome")
+            logger.debug(
+                "custom_action_processed_detailed",
+                **outcome_details,
+                scenario_id=scenario['id'],
+                custom_action=custom_action
+            )
+
             # Store outcome
             session_id = self.user_state[user_id]['session_id']
             await self.progress_repo.record_scenario_outcome(
@@ -659,12 +703,41 @@ What do you do?"""
 
                 self.scenario_engine.cleanup_scenario(scenario['id'])
             else:
+                # Continue scenario
                 keyboard = []
-                for i, action in enumerate(outcome['next_actions'][:3]):
-                    keyboard.append([InlineKeyboardButton(
-                        f"{i+1}. {action[:50]}...",
-                        callback_data=f"action_{i}"
-                    )])
+                
+                # Log before attempting subscript access
+                logger.debug(
+                    "before_custom_next_actions_access",
+                    outcome_type=type(outcome).__name__,
+                    has_next_actions=hasattr(outcome, 'next_actions'),
+                    next_actions_value=getattr(outcome, 'next_actions', 'NO_ATTR') if hasattr(outcome, 'next_actions') else 'NO_ATTR'
+                )
+                
+                try:
+                    # Use attribute access instead of subscript access
+                    next_actions = outcome.next_actions if hasattr(outcome, 'next_actions') else []
+                    logger.debug(
+                        "custom_next_actions_retrieved",
+                        next_actions_count=len(next_actions) if next_actions else 0,
+                        next_actions_type=type(next_actions).__name__
+                    )
+                    
+                    for i, action in enumerate(next_actions[:3]):
+                        keyboard.append([InlineKeyboardButton(
+                            f"{i+1}. {action[:50]}...",
+                            callback_data=f"action_{i}"
+                        )])
+                except Exception as e:
+                    logger.error(
+                        "custom_next_actions_access_failed",
+                        error=str(e),
+                        error_type=type(e).__name__,
+                        outcome_details=log_object_details(outcome, "custom_outcome_error")
+                    )
+                    # Fallback: create empty actions list
+                    next_actions = []
+                
                 keyboard.append([InlineKeyboardButton("✍️ Custom Action", callback_data='custom_action')])
                 keyboard.append([InlineKeyboardButton("🛑 End Scenario", callback_data='end_scenario')])
 

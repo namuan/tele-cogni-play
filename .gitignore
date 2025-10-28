@@ -5,6 +5,8 @@ __pycache__/
 # unignore folders
 !cogniplay/
 !docs/
+!scripts/
+!.trae/
 
 # unignore files
 !.gitignore
