@@ -1,2 +1,2 @@
 cd $1 || exit
-bash ./scripts/stop_screen.sh tele-mind-gym
+bash ./scripts/stop_screen.sh tele-cogni-play

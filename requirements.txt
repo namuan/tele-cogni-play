@@ -3,6 +3,7 @@ python-telegram-bot
 python-dotenv
 pydantic
 pydantic-settings
+structlog
 
 # Database
 sqlalchemy

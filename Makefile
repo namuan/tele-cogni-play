@@ -14,34 +14,32 @@ clean: ## Clean package
 	rm -rf build dist
 
 deploy: clean ## Copies any changed file to the server
-	ssh ${PROJECTNAME} -C 'bash -l -c "mkdir -vp ./tele-mind-gym"'
+	ssh ${PROJECTNAME} -C 'bash -l -c "mkdir -vp ./tele-cogni-play"'
 	rsync -avzr \
 		.env \
-		main.py \
-		manage.py \
-		mind_gym_bot \
-		requirements.txt \
+		cogniplay \
 		scripts \
-		${PROJECTNAME}:./tele-mind-gym
+		requirements.txt \
+		${PROJECTNAME}:./tele-cogni-play
 
 start: deploy ## Sets up a screen session on the server and start the app
-	ssh ${PROJECTNAME} -C 'bash -l -c "./tele-mind-gym/scripts/setup_bot.sh ${PROJECTNAME}"'
+	ssh ${PROJECTNAME} -C 'bash -l -c "./tele-cogni-play/scripts/setup_bot.sh ${PROJECTNAME}"'
 
 stop: deploy ## Stop any running screen session on the server
-	ssh ${PROJECTNAME} -C 'bash -l -c "./tele-mind-gym/scripts/stop_bot.sh ${PROJECTNAME}"'
+	ssh ${PROJECTNAME} -C 'bash -l -c "./tele-cogni-play/scripts/stop_bot.sh ${PROJECTNAME}"'
 
 ssh: ## SSH into the target VM
 	ssh ${PROJECTNAME}
 
-run: lint ## Run bot locally
-	./venv/bin/python3 main.py
+run: ## Run bot locally
+	./venv/bin/python3 -m cogniplay.main
 
 .PHONY: help
 .DEFAULT_GOAL := help
 
 help: Makefile
 	echo
-	echo " Choose a command run in "$(PROJECTNAME)":"
+	echo " Choose a command run in "$(PROJECTNAME)":
 	echo
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
 	echo

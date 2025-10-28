@@ -2,6 +2,8 @@
 
 🧠 **CogniPlay** is a comprehensive Telegram bot for personal cognitive training, featuring adaptive difficulty, AI-powered role-playing scenarios, and detailed progress analytics.
 
+![](docs/intro.png)
+
 ## Features
 
 ### 🧩 Cognitive Exercises
