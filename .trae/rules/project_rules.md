@@ -1,0 +1,1 @@
+- Use venv/bin/python3 for running the bot or any other command using this project
