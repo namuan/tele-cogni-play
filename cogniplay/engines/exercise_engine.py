@@ -18,7 +18,7 @@ class ExerciseEngine:
             'logic': LogicExerciseGenerator(openrouter_client),
             'problem_solving': ProblemSolvingGenerator(openrouter_client),
             'pattern_recognition': PatternRecognitionGenerator(openrouter_client),
-            'attention': AttentionExerciseGenerator()
+            'attention': AttentionExerciseGenerator(openrouter_client)
         }
 
     async def generate_exercise(
@@ -303,8 +303,15 @@ Use ■ for filled squares and □ for empty squares."""
             # Consider correct if at least 70% remembered
             return matches >= len(correct_words) * 0.7
         else:
-            # Exact match for sequences and numbers
-            return str(user_answer).strip() == str(correct_answer).strip()
+            # Handle comma-separated answers with flexible spacing
+            if ',' in str(correct_answer) and ',' in str(user_answer):
+                correct_parts = [part.strip().lower() for part in str(correct_answer).split(',')]
+                user_parts = [part.strip().lower() for part in str(user_answer).split(',')]
+                # Check if all correct parts are present in user's answer (order doesn't matter)
+                return set(correct_parts) == set(user_parts)
+            else:
+                # Exact match for simple answers
+                return str(user_answer).strip().lower() == str(correct_answer).strip().lower()
 
 
 class LogicExerciseGenerator:
@@ -1449,140 +1456,318 @@ Respond with ONLY "correct" if the answer is logically correct, or "incorrect" i
 
 
 class AttentionExerciseGenerator:
-    """Generate attention and focus exercises"""
+    """Generate attention and focus exercises using LLM with fallback"""
+
+    def __init__(self, openrouter_client=None):
+        self.client = openrouter_client
 
     async def generate(self, difficulty: int) -> Exercise:
-        """Generate attention exercise"""
+        """Generate attention exercise using LLM with fallback to hardcoded exercises"""
+
+        # If no LLM client, fall back to hardcoded exercises
+        if not self.client:
+            logger.info("no_llm_client_falling_back_to_hardcoded_attention")
+            exercise_types = [
+                self._selective_attention_hardcoded,
+                self._information_filtering_hardcoded,
+                self._focus_challenge_hardcoded
+            ]
+            generator_func = random.choice(exercise_types)
+            return generator_func(difficulty)
+
+        # Use LLM to generate dynamic exercise
+        return await self._generate_llm_exercise(difficulty)
+
+    async def _generate_llm_exercise(self, difficulty: int) -> Exercise:
+        """Generate attention exercise using LLM"""
 
         exercise_types = [
-            self._selective_attention,
-            self._information_filtering,
-            self._focus_challenge
+            "selective_attention",
+            "information_filtering",
+            "focus_challenge"
         ]
 
-        generator_func = random.choice(exercise_types)
-        return generator_func(difficulty)
+        exercise_type = random.choice(exercise_types)
 
-    def _selective_attention(self, difficulty: int) -> Exercise:
-        """Generate selective attention exercise"""
+        try:
+            # Generate exercise via LLM
+            exercise_data = await self.client.generate_attention_exercise(
+                exercise_type,
+                difficulty
+            )
 
-        # Generate text with specific words to find
-        distractors = ["the", "and", "but", "for", "with", "from", "about"]
-        targets = ["focus", "attention", "concentrate"]
+            # Create Exercise object from LLM data
+            return Exercise(
+                id=str(uuid.uuid4()),
+                category='attention',
+                type=exercise_type,
+                difficulty=difficulty,
+                question=exercise_data['question'],
+                correct_answer=exercise_data['answer'],
+                options=exercise_data.get('options'),
+                time_limit_seconds=60 + difficulty * 15,
+                hints=exercise_data.get('hints', [
+                    "Pay close attention to details",
+                    "Focus on the specific task",
+                    "Avoid distractions"
+                ])
+            )
 
-        # Build sentence
-        words = []
-        target_count = difficulty + 2
-        for i in range(target_count):
-            words.extend(random.sample(distractors, 3))
-            words.append(random.choice(targets))
+        except Exception as e:
+            logger.warning(
+                "llm_attention_generation_failed",
+                error=str(e),
+                exercise_type=exercise_type,
+                difficulty=difficulty,
+                falling_back_to_hardcoded=True
+            )
+            # Fall back to hardcoded generator
+            fallback_methods = {
+                'selective_attention': self._selective_attention_hardcoded,
+                'information_filtering': self._information_filtering_hardcoded,
+                'focus_challenge': self._focus_challenge_hardcoded
+            }
+            return fallback_methods[exercise_type](difficulty)
 
-        text = ' '.join(words)
+    def _selective_attention_hardcoded(self, difficulty: int) -> Exercise:
+        """Generate hardcoded selective attention exercise"""
+        
+        if difficulty <= 2:
+            # Simple color and shape task
+            question = """Selective Attention Exercise - Color Focus
 
-        question = f"""Attention Exercise - Selective Attention
+Read the following list of words and count ONLY the words that are written in RED:
 
-Count how many times the word "focus" appears in the following text:
+RED, blue, RED, green, RED, blue, green, RED, blue, RED
 
-{text}
+Type the count of RED words:"""
+            correct_answer = "4"
+        elif difficulty <= 4:
+            # More complex task with mixed attributes
+            question = """Selective Attention Exercise - Mixed Attributes
 
-Type your answer (just the number):"""
+Read the following sequence and count ONLY the numbers that are ODD:
 
-        correct_count = text.lower().count('focus')
+3, red, 8, blue, 5, green, 2, red, 7, blue, 4, green, 9, red
 
+Type the count of odd numbers:"""
+            correct_answer = "4"
+        else:
+            # Complex task with multiple layers
+            question = """Selective Attention Exercise - Complex Filtering
+
+Read the following text and identify ALL words that:
+1. Are exactly 4 letters long
+2. Start with a consonant
+3. Are NOT colors
+
+Text: The quick brown fox jumps over the lazy dog. Please help me find these special words.
+
+Type the words separated by commas:"""
+            correct_answer = "jumps,help,find,these,words"
+        
         return Exercise(
             id=str(uuid.uuid4()),
             category='attention',
             type='selective_attention',
             difficulty=difficulty,
             question=question,
-            correct_answer=str(correct_count),
+            correct_answer=correct_answer,
             options=None,
-            time_limit_seconds=60 + difficulty * 10,
+            time_limit_seconds=60 + difficulty * 15,  # Consistent with LLM exercises
             hints=[
-                "Read carefully",
-                "Don't count similar words",
-                "Read through twice to verify"
+                "Focus only on the specific criteria mentioned",
+                "Ignore all other information",
+                "Double-check your count/selection"
             ]
         )
 
-    def _information_filtering(self, difficulty: int) -> Exercise:
-        """Generate information filtering exercise"""
+    def _information_filtering_hardcoded(self, difficulty: int) -> Exercise:
+        """Generate hardcoded information filtering exercise"""
+        
+        if difficulty <= 2:
+            # Simple relevant vs irrelevant
+            question = """Information Filtering Exercise - Relevant Information
 
-        # Present mixed relevant and irrelevant information
-        question = f"""Attention Exercise - Information Filtering
+You need to plan a beach vacation. Which of these items are RELEVANT to your planning?
 
-Read this scenario and identify the KEY information:
+Items: swimsuit, umbrella, winter coat, sunscreen, sunglasses, snow boots
 
-"Sarah needs to attend a meeting at 2 PM. She likes coffee. The meeting is in Room 304. Her favorite color is blue. She needs to bring the Q3 report. The weather is sunny. The report is on her desk."
+Type only the relevant items separated by commas:"""
+            correct_answer = "swimsuit,umbrella,sunscreen,sunglasses"
+        elif difficulty <= 4:
+            # More complex filtering
+            question = """Information Filtering Exercise - Business Context
 
-What are the 3 essential pieces of information for the meeting? (separate with commas)
+You're analyzing a company's financial report for investment purposes. Which information is MOST RELEVANT for your decision?
 
-Example format: time, location, item"""
+Financial Data:
+- Revenue: $2.5M (up 15% from last quarter)
+- CEO's favorite color: blue
+- Operating expenses: $1.8M
+- Company founded in 1995
+- Net profit: $700K
+- Office location: 123 Main Street
+- Employee satisfaction: 85%
+- Stock price: $45.20 (up 5% today)
 
+Type the 3 most relevant financial metrics:"""
+            correct_answer = "revenue,operating expenses,net profit"
+        else:
+            # Complex multi-step filtering
+            question = """Information Filtering Exercise - Multi-Step Analysis
+
+You're researching climate change impacts on agriculture. Filter this information to find ONLY data that:
+1. Is from the last 5 years (2019-2024)
+2. Relates to crop yields specifically
+3. Shows statistical significance
+
+Research Data:
+- 2018: Wheat yields decreased by 3% due to drought (p=0.02)
+- 2019: Corn yields increased by 8% with new irrigation (p=0.001)
+- 2020: Rice yields stable despite floods (p=0.15)
+- 2021: Soybean yields decreased by 12% due to heatwave (p<0.001)
+- 2022: Overall agricultural output increased by 5% (p=0.08)
+- 2023: Wheat yields increased by 7% with climate-resistant seeds (p=0.003)
+- 2024: Potato yields decreased by 4% due to unexpected frost (p=0.04)
+
+Type the relevant findings with their significance levels:"""
+            correct_answer = "2019:corn yields increased by 8% with new irrigation (p=0.001),2023:wheat yields increased by 7% with climate-resistant seeds (p=0.003),2024:potato yields decreased by 4% due to unexpected frost (p=0.04)"
+        
         return Exercise(
             id=str(uuid.uuid4()),
             category='attention',
             type='information_filtering',
             difficulty=difficulty,
             question=question,
-            correct_answer='2 pm, room 304, q3 report',
+            correct_answer=correct_answer,
             options=None,
-            time_limit_seconds=90,
+            time_limit_seconds=60 + difficulty * 15,
             hints=[
-                "What's directly relevant to the meeting?",
-                "Ignore personal preferences",
-                "Focus on actionable information"
+                "Focus on the specific filtering criteria",
+                "Eliminate information that doesn't match",
+                "Be thorough in your analysis"
             ]
         )
 
-    def _focus_challenge(self, difficulty: int) -> Exercise:
-        """Generate focus challenge"""
+    def _focus_challenge_hardcoded(self, difficulty: int) -> Exercise:
+        """Generate hardcoded focus challenge exercise"""
+        
+        if difficulty <= 2:
+            # Simple sustained attention task
+            question = """Focus Challenge - Sustained Attention
 
-        # Create a simple math problem with distractors
-        num1 = random.randint(10, 50)
-        num2 = random.randint(10, 50)
-        num3 = random.randint(1, 10)
+Carefully read the following text and answer the question:
 
-        question = f"""Attention Exercise - Focus Challenge
+The quick brown fox jumps over the lazy dog. The lazy dog barks at the quick brown fox. The fox runs away from the barking dog.
 
-Calculate: ({num1} + {num2}) × {num3}
+Question: How many times does the word "dog" appear in the text?
 
-But first, ignore this distraction:
-- The sky is blue
-- 2 + 2 = 4
-- Elephants are large
+Type your answer:"""
+            correct_answer = "2"
+        elif difficulty <= 4:
+            # More complex focus task with distractions
+            question = """Focus Challenge - Resistance to Distractions
 
-Now solve: ({num1} + {num2}) × {num3} = ?
+Ignore the words in parentheses and count only the bolded words:
 
-Type your answer (just the number):"""
+**The** (quick) **brown** (fox) **jumps** (over) **the** (lazy) **dog**. **The** (quick) **brown** (fox) **runs** (away) **from** (the) **barking** (dog).
 
-        correct_answer = (num1 + num2) * num3
+Question: How many bolded words are there?
 
+Type your answer:"""
+            correct_answer = "8"
+        else:
+            # Complex focus challenge with time pressure
+            question = """Focus Challenge - Complex Pattern Recognition
+
+Study this sequence for 30 seconds, then answer without looking back:
+
+Sequence: A-1, B-2, C-3, D-4, E-5, F-6, G-7, H-8, I-9, J-10
+
+Now, answer these questions:
+1. What letter corresponds to number 7?
+2. What number corresponds to letter D?
+3. What is the sum of all numbers?
+4. How many vowels are in the sequence?
+
+Type your answers separated by commas:"""
+            correct_answer = "G,4,55,3"
+        
         return Exercise(
             id=str(uuid.uuid4()),
             category='attention',
             type='focus_challenge',
             difficulty=difficulty,
             question=question,
-            correct_answer=str(correct_answer),
+            correct_answer=correct_answer,
             options=None,
-            time_limit_seconds=60,
+            time_limit_seconds=30 + difficulty * 10,
             hints=[
-                "Follow order of operations",
-                "Ignore the distractors",
-                "Calculate step by step"
+                "Maintain focus throughout the task",
+                "Ignore irrelevant information",
+                "Work systematically through the questions"
             ]
         )
 
     async def validate(self, correct_answer: Any, user_answer: Any) -> bool:
-        """Validate attention exercise answer"""
-        # For information filtering, check if key terms are present
-        if isinstance(correct_answer, str) and ',' in correct_answer:
-            correct_terms = set(correct_answer.lower().split(','))
-            user_terms = set(str(user_answer).lower().split(','))
-            # Accept if at least 2 out of 3 key terms are present
-            matches = len(correct_terms.intersection(user_terms))
-            return matches >= 2
+        """Validate attention exercise answer using LLM with fallback to exact matching"""
+        
+        # If no LLM client, fall back to exact matching
+        if not self.client:
+            return str(user_answer).strip().lower() == str(correct_answer).strip().lower()
+        
+        # Use LLM for semantic validation
+        return await self._validate_llm_attention_answer(correct_answer, user_answer)
+    
+    async def _validate_llm_attention_answer(self, correct_answer: Any, user_answer: Any) -> bool:
+        """Validate attention answer using LLM semantic understanding"""
+        
+        try:
+            # Create a validation prompt for LLM
+            validation_prompt = [{
+                'role': 'system',
+                'content': f"""You are an attention exercise validator. Determine if the user's answer is logically correct for the given attention exercise.
 
-        return str(user_answer).strip().lower() == str(correct_answer).strip().lower()
+User's answer: "{user_answer}"
+Correct answer: "{correct_answer}"
+
+Evaluate if the user's answer is semantically equivalent or logically correct compared to the correct answer. Consider:
+1. Synonyms and alternative phrasings
+2. Numerical answers with different formatting
+3. Case insensitivity
+4. For attention exercises: focus on whether the core requirement is met
+5. For information filtering: whether key information is identified regardless of exact wording
+
+Respond with ONLY "correct" if the answer is logically correct, or "incorrect" if it's wrong."""
+            }]
+            
+            response = await self.client._make_request(
+                model=self.client.config.fallback_model,  # Use cheaper model for validation
+                messages=validation_prompt,
+                temperature=0.1,  # Low temperature for consistent validation
+                max_tokens=10
+            )
+            
+            result_text = response['choices'][0]['message']['content'].strip().lower()
+            
+            logger.debug(
+                "llm_attention_validation_result",
+                user_answer=user_answer,
+                correct_answer=correct_answer,
+                llm_result=result_text
+            )
+            
+            return 'incorrect' not in result_text
+            
+        except Exception as e:
+            logger.warning(
+                "llm_attention_validation_failed",
+                error=str(e),
+                falling_back_to_exact_match=True,
+                user_answer=user_answer,
+                correct_answer=correct_answer
+            )
+            # Fall back to exact matching if LLM validation fails
+            return str(user_answer).strip().lower() == str(correct_answer).strip().lower()
 

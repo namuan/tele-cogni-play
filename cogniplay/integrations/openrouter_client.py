@@ -282,6 +282,185 @@ class OpenRouterClient:
             
             raise
 
+    async def generate_attention_exercise(
+        self,
+        exercise_type: str,
+        difficulty: int
+    ) -> Dict[str, Any]:
+        """Generate attention exercise using LLM"""
+
+        # Validate exercise type
+        valid_exercise_types = ['selective_attention', 'information_filtering', 'focus_challenge']
+        if exercise_type not in valid_exercise_types:
+            raise ValueError(f"Invalid exercise type: {exercise_type}. Must be one of: {valid_exercise_types}")
+
+        # Validate difficulty
+        if not isinstance(difficulty, int) or difficulty < 1 or difficulty > 5:
+            raise ValueError(f"Difficulty must be an integer between 1 and 5, got: {difficulty}")
+
+        prompt = self._build_attention_exercise_prompt(
+            exercise_type, difficulty
+        )
+
+        try:
+            response = await self._make_request(
+                model=self.config.primary_model,
+                messages=prompt,
+                temperature=0.8,
+                max_tokens=500
+            )
+
+            parsed_response = self._parse_attention_exercise_response(response)
+
+            logger.info(
+                "attention_exercise_generated",
+                exercise_type=exercise_type,
+                difficulty=difficulty,
+                tokens=response.get('usage', {}).get('total_tokens'),
+                model=self.config.primary_model
+            )
+
+            return parsed_response
+
+        except Exception as e:
+            logger.error(
+                "attention_generation_failed",
+                error=str(e),
+                exercise_type=exercise_type,
+                difficulty=difficulty,
+                model=self.config.primary_model
+            )
+
+            # Fallback to simpler model
+            if self.config.primary_model != self.config.fallback_model:
+                logger.info("falling_back_to_backup_model_for_attention")
+                try:
+                    response = await self._make_request(
+                        model=self.config.fallback_model,
+                        messages=prompt,
+                        temperature=0.8,
+                        max_tokens=500
+                    )
+                    return self._parse_attention_exercise_response(response)
+                except Exception as fallback_error:
+                    logger.error(
+                        "fallback_model_also_failed",
+                        error=str(fallback_error),
+                        exercise_type=exercise_type,
+                        difficulty=difficulty
+                    )
+            
+            raise
+
+    def _build_attention_exercise_prompt(
+        self,
+        exercise_type: str,
+        difficulty: int
+    ) -> list:
+        """Build prompt for attention exercise generation"""
+
+        difficulty_descriptions = {
+            1: "Simple attention exercises with clear focus requirements and minimal distractions",
+            2: "Moderate complexity with some competing information and basic filtering needs",
+            3: "Complex attention tasks requiring sustained focus and information prioritization",
+            4: "Challenging exercises with multiple distractions and complex filtering requirements",
+            5: "Highly complex attention tasks with heavy cognitive load and sophisticated filtering"
+        }
+
+        type_specific_instructions = {
+            'selective_attention': """Create a selective attention exercise where users must focus on specific information while ignoring distractions.
+                                    Include a main task with competing information that requires careful attention to detail.""",
+            'information_filtering': """Create an information filtering exercise where users must identify and extract relevant information from a larger set.
+                                      Include both relevant and irrelevant information that needs to be distinguished.""",
+            'focus_challenge': """Create a focus challenge exercise that requires sustained attention and resistance to distractions.
+                                 Include tasks that test the ability to maintain focus over time and through interruptions."""
+        }
+
+        system_prompt = f"""Generate a {exercise_type} attention exercise for cognitive training.
+
+Exercise Type: {exercise_type}
+Difficulty Level: {difficulty}/5 - {difficulty_descriptions.get(difficulty, '')}
+
+Specific Instructions:
+{type_specific_instructions.get(exercise_type, 'Create an engaging attention exercise.')}
+
+Requirements:
+1. Create a clear attention task that tests focus and concentration
+2. Include specific instructions that guide the user on what to pay attention to
+3. Provide a definitive correct answer based on the attention requirements
+4. Include 2-3 helpful hints that guide attention without giving away the answer
+5. Set appropriate time limits based on difficulty
+6. For multiple choice questions, provide realistic but incorrect distractors
+7. Ensure the exercise genuinely tests attention and focus skills
+
+Format your response as JSON:
+{{
+  "question": "The attention exercise with full context and instructions",
+  "answer": "The correct answer based on attention requirements",
+  "options": ["option1", "option2", "option3"], // for multiple choice only
+  "hints": ["hint1", "hint2", "hint3"],
+  "attention_focus": "Brief explanation of what aspect of attention is being tested"
+}}"""
+
+        return [{"role": "system", "content": system_prompt}]
+
+    def _parse_attention_exercise_response(self, response: Dict) -> Dict[str, Any]:
+        """Parse attention exercise generation response"""
+
+        content = response['choices'][0]['message']['content']
+
+        try:
+            import json
+            import re
+
+            # Remove markdown code blocks if present
+            content = content.strip()
+
+            # Remove any text before the first { or [
+            json_start = content.find('{')
+            if json_start == -1:
+                json_start = content.find('[')
+            if json_start > 0:
+                content = content[json_start:]
+
+            # Remove any text after the last } or ]
+            json_end = content.rfind('}')
+            if json_end == -1:
+                json_end = content.rfind(']')
+            if json_end >= 0:
+                content = content[:json_end + 1]
+
+            # Remove any remaining markdown formatting
+            content = re.sub(r'```\w*\n?', '', content)
+
+            # Clean up common LLM JSON issues
+            # Remove JavaScript-style comments
+            content = re.sub(r'//.*?$', '', content, flags=re.MULTILINE)
+            # Remove trailing commas before closing brackets/braces
+            content = re.sub(r',(\s*[}\]])', r'\1', content)
+            # Fix common escaping issues
+            content = content.replace('\\n', ' ').replace('\\"', '"')
+            # Remove extra whitespace that might cause issues
+            content = re.sub(r'\s+', ' ', content).strip()
+
+            parsed_data = json.loads(content)
+
+            # Ensure all required fields are present with defaults
+            return {
+                'question': parsed_data.get('question', ''),
+                'answer': parsed_data.get('answer', ''),
+                'options': parsed_data.get('options'),
+                'hints': parsed_data.get('hints', []),
+                'attention_focus': parsed_data.get('attention_focus', '')
+            }
+
+        except json.JSONDecodeError as e:
+            logger.error("attention_exercise_parse_failed", content=content, error=str(e))
+            raise
+        except Exception as e:
+            logger.error("attention_exercise_parse_error", content=content, error=str(e))
+            raise
+
     async def _make_request(
         self,
         model: str,
