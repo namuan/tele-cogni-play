@@ -17,7 +17,7 @@ class ExerciseEngine:
             'memory': MemoryExerciseGenerator(),
             'logic': LogicExerciseGenerator(openrouter_client),
             'problem_solving': ProblemSolvingGenerator(openrouter_client),
-            'pattern_recognition': PatternRecognitionGenerator(),
+            'pattern_recognition': PatternRecognitionGenerator(openrouter_client),
             'attention': AttentionExerciseGenerator()
         }
 
@@ -842,157 +842,610 @@ Respond with ONLY "correct" if the answer is logically correct, or "incorrect" i
 class PatternRecognitionGenerator:
     """Generate pattern recognition exercises"""
 
+    def __init__(self, openrouter_client=None):
+        self.client = openrouter_client
+
     async def generate(self, difficulty: int) -> Exercise:
-        """Generate pattern recognition exercise"""
+        """Generate pattern recognition exercise using LLM with fallback to LLM-based methods"""
+
+        # If no LLM client, fall back to simple LLM-based generators
+        if not self.client:
+            exercise_types = [
+                self._number_sequence,
+                self._analogy,
+                self._classification,
+                self._visual_pattern,
+                self._sequence_completion
+            ]
+            generator_func = random.choice(exercise_types)
+            # For no client case, use sync fallback methods
+            if generator_func in [self._visual_pattern, self._sequence_completion]:
+                return generator_func(difficulty)
+            else:
+                # For async methods that need LLM, create simple sync versions
+                return self._create_simple_fallback(generator_func.__name__, difficulty)
+
+        # Always attempt LLM generation first
+        try:
+            return await self._generate_llm_exercise(difficulty)
+        except Exception as e:
+            logger.warning(
+                "llm_generation_failed_falling_back_to_llm_methods",
+                error=str(e),
+                difficulty=difficulty
+            )
+            # Fall back to LLM-based methods that don't require client calls
+            exercise_types = [
+                self._visual_pattern,
+                self._sequence_completion
+            ]
+            generator_func = random.choice(exercise_types)
+            return generator_func(difficulty)
+
+    async def _generate_llm_exercise(self, difficulty: int) -> Exercise:
+        """Generate pattern recognition exercise using LLM"""
 
         exercise_types = [
-            self._number_sequence,
-            self._analogy,
-            self._classification
+            "number_sequence",
+            "analogy",
+            "classification",
+            "visual_pattern",
+            "sequence_completion"
         ]
 
-        generator_func = random.choice(exercise_types)
-        return generator_func(difficulty)
+        exercise_type = random.choice(exercise_types)
 
-    def _number_sequence(self, difficulty: int) -> Exercise:
-        """Generate number sequence puzzle"""
+        try:
+            # Generate exercise via LLM
+            exercise_data = await self.client.generate_pattern_recognition_exercise(
+                exercise_type,
+                difficulty
+            )
+
+            # Create Exercise object from LLM data
+            return Exercise(
+                id=str(uuid.uuid4()),
+                category='pattern_recognition',
+                type=exercise_type,
+                difficulty=difficulty,
+                question=exercise_data['question'],
+                correct_answer=exercise_data['answer'],
+                options=exercise_data.get('options'),
+                time_limit_seconds=60 + difficulty * 15,
+                hints=exercise_data.get('hints', [
+                    "Look for patterns and relationships",
+                    "Consider different types of progressions",
+                    "Think about the underlying rule"
+                ])
+            )
+
+        except Exception as e:
+            logger.warning(
+                "llm_pattern_recognition_generation_failed",
+                error=str(e),
+                exercise_type=exercise_type,
+                difficulty=difficulty,
+                falling_back_to_llm_methods=True
+            )
+            # Fall back to LLM-based methods that don't require client calls
+            fallback_methods = {
+                'number_sequence': self._number_sequence,
+                'analogy': self._analogy,
+                'classification': self._classification,
+                'visual_pattern': self._visual_pattern,
+                'sequence_completion': self._sequence_completion
+            }
+            return fallback_methods[exercise_type](difficulty)
+
+    def _create_simple_fallback(self, method_name: str, difficulty: int) -> Exercise:
+        """Create simple fallback exercise when LLM client is not available"""
+        if method_name == "_number_sequence":
+            if difficulty <= 2:
+                seq = [2, 4, 6, 8, '?']
+                answer = '10'
+                pattern = 'Add 2'
+            elif difficulty <= 4:
+                seq = [1, 2, 4, 8, '?']
+                answer = '16'
+                pattern = 'Multiply by 2'
+            else:
+                seq = [1, 1, 2, 3, 5, '?']
+                answer = '8'
+                pattern = 'Fibonacci-like'
+            
+            question = f"""Pattern Recognition - Number Sequence
+
+What number comes next?
+
+{', '.join([str(x) for x in seq])}
+
+Type your answer (just the number):"""
+
+            return Exercise(
+                id=str(uuid.uuid4()),
+                category='pattern_recognition',
+                type='number_sequence',
+                difficulty=difficulty,
+                question=question,
+                correct_answer=answer,
+                options=None,
+                time_limit_seconds=60 + difficulty * 15,
+                hints=[
+                    "Look for arithmetic patterns",
+                    "Try differences between numbers",
+                    f"Pattern hint: {pattern[:3]}..."
+                ]
+            )
+        
+        elif method_name == "_analogy":
+            if difficulty <= 2:
+                premise = "Hot is to Cold as Up is to ___"
+                answer = 'down'
+            elif difficulty <= 4:
+                premise = "Pen is to Writer as Brush is to ___"
+                answer = 'painter'
+            else:
+                premise = "Book is to Library as Painting is to ___"
+                answer = 'gallery'
+            
+            question = f"""Pattern Recognition - Analogy
+
+Complete the analogy:
+
+{premise}
+
+Type your answer:"""
+
+            return Exercise(
+                id=str(uuid.uuid4()),
+                category='pattern_recognition',
+                type='analogy',
+                difficulty=difficulty,
+                question=question,
+                correct_answer=answer,
+                options=None,
+                time_limit_seconds=60,
+                hints=[
+                    "What's the relationship?",
+                    "Think about function or purpose",
+                    "Consider the context"
+                ]
+            )
+        
+        elif method_name == "_classification":
+            if difficulty <= 2:
+                words = "Apple, Banana, Carrot, Orange, Grape"
+                answer = 'carrot'
+            elif difficulty <= 4:
+                words = "Dog, Cat, Bird, Fish, Tiger"
+                answer = 'bird'
+            else:
+                words = "Car, Boat, Train, Airplane, Bicycle"
+                answer = 'bicycle'
+            
+            question = f"""Pattern Recognition - Classification
+
+Which word doesn't belong?
+
+{words}
+
+Type your answer:"""
+
+            return Exercise(
+                id=str(uuid.uuid4()),
+                category='pattern_recognition',
+                type='classification',
+                difficulty=difficulty,
+                question=question,
+                correct_answer=answer,
+                options=None,
+                time_limit_seconds=45,
+                hints=[
+                    "What do most of them have in common?",
+                    "Think about categories",
+                    "One is different from the others"
+                ]
+            )
+        
+        else:
+            # Default fallback
+            return Exercise(
+                id=str(uuid.uuid4()),
+                category='pattern_recognition',
+                type='pattern_recognition',
+                difficulty=difficulty,
+                question=f"Pattern Recognition - {method_name.replace('_', ' ').title()}\n\nComplete this {difficulty}-level pattern recognition exercise.",
+                correct_answer='answer',
+                options=None,
+                time_limit_seconds=60 + difficulty * 15,
+                hints=[
+                    "Look for patterns and relationships",
+                    "Consider different types of progressions",
+                    "Think about the underlying rule"
+                ]
+            )
+
+    async def _number_sequence(self, difficulty: int) -> Exercise:
+        """Generate number sequence puzzle using LLM fallback"""
+        
+        try:
+            # Use LLM to generate number sequence
+            exercise_data = await self.client.generate_pattern_recognition_exercise(
+                "number_sequence",
+                difficulty
+            )
+            
+            return Exercise(
+                id=str(uuid.uuid4()),
+                category='pattern_recognition',
+                type='number_sequence',
+                difficulty=difficulty,
+                question=exercise_data['question'],
+                correct_answer=exercise_data['answer'],
+                options=exercise_data.get('options'),
+                time_limit_seconds=60 + difficulty * 15,
+                hints=exercise_data.get('hints', [
+                    "Look for arithmetic patterns",
+                    "Try differences between numbers",
+                    "Consider the pattern rule"
+                ])
+            )
+            
+        except Exception as e:
+            logger.warning(
+                "llm_number_sequence_failed",
+                error=str(e),
+                difficulty=difficulty,
+                falling_back_to_simple=True
+            )
+            # Simple fallback sequence
+            if difficulty <= 2:
+                seq = [2, 4, 6, 8, '?']
+                answer = '10'
+                pattern = 'Add 2'
+            elif difficulty <= 4:
+                seq = [1, 2, 4, 8, '?']
+                answer = '16'
+                pattern = 'Multiply by 2'
+            else:
+                seq = [1, 1, 2, 3, 5, '?']
+                answer = '8'
+                pattern = 'Fibonacci-like'
+            
+            question = f"""Pattern Recognition - Number Sequence
+
+What number comes next?
+
+{', '.join([str(x) for x in seq])}
+
+Type your answer (just the number):"""
+
+            return Exercise(
+                id=str(uuid.uuid4()),
+                category='pattern_recognition',
+                type='number_sequence',
+                difficulty=difficulty,
+                question=question,
+                correct_answer=answer,
+                options=None,
+                time_limit_seconds=60 + difficulty * 15,
+                hints=[
+                    "Look for arithmetic patterns",
+                    "Try differences between numbers",
+                    f"Pattern hint: {pattern[:3]}..."
+                ]
+            )
+
+    async def _analogy(self, difficulty: int) -> Exercise:
+        """Generate analogy puzzle using LLM fallback"""
+        
+        try:
+            # Use LLM to generate analogy
+            exercise_data = await self.client.generate_pattern_recognition_exercise(
+                "analogy",
+                difficulty
+            )
+            
+            return Exercise(
+                id=str(uuid.uuid4()),
+                category='pattern_recognition',
+                type='analogy',
+                difficulty=difficulty,
+                question=exercise_data['question'],
+                correct_answer=exercise_data['answer'],
+                options=exercise_data.get('options'),
+                time_limit_seconds=60,
+                hints=exercise_data.get('hints', [
+                    "What's the relationship?",
+                    "Think about function or purpose",
+                    "Consider the context"
+                ])
+            )
+            
+        except Exception as e:
+            logger.warning(
+                "llm_analogy_failed",
+                error=str(e),
+                difficulty=difficulty,
+                falling_back_to_simple=True
+            )
+            # Simple fallback analogy
+            if difficulty <= 2:
+                premise = "Hot is to Cold as Up is to ___"
+                answer = 'down'
+            elif difficulty <= 4:
+                premise = "Pen is to Writer as Brush is to ___"
+                answer = 'painter'
+            else:
+                premise = "Book is to Library as Painting is to ___"
+                answer = 'gallery'
+            
+            question = f"""Pattern Recognition - Analogy
+
+Complete the analogy:
+
+{premise}
+
+Type your answer:"""
+
+            return Exercise(
+                id=str(uuid.uuid4()),
+                category='pattern_recognition',
+                type='analogy',
+                difficulty=difficulty,
+                question=question,
+                correct_answer=answer,
+                options=None,
+                time_limit_seconds=60,
+                hints=[
+                    "What's the relationship?",
+                    "Think about function or purpose",
+                    "Consider the context"
+                ]
+            )
+
+    async def _classification(self, difficulty: int) -> Exercise:
+        """Generate classification puzzle using LLM fallback"""
+        
+        try:
+            # Use LLM to generate classification
+            exercise_data = await self.client.generate_pattern_recognition_exercise(
+                "classification",
+                difficulty
+            )
+            
+            return Exercise(
+                id=str(uuid.uuid4()),
+                category='pattern_recognition',
+                type='classification',
+                difficulty=difficulty,
+                question=exercise_data['question'],
+                correct_answer=exercise_data['answer'],
+                options=exercise_data.get('options'),
+                time_limit_seconds=45,
+                hints=exercise_data.get('hints', [
+                    "What do most of them have in common?",
+                    "Think about categories",
+                    "One is different from the others"
+                ])
+            )
+            
+        except Exception as e:
+            logger.warning(
+                "llm_classification_failed",
+                error=str(e),
+                difficulty=difficulty,
+                falling_back_to_simple=True
+            )
+            # Simple fallback classification
+            if difficulty <= 2:
+                words = "Apple, Banana, Carrot, Orange, Grape"
+                answer = 'carrot'
+            elif difficulty <= 4:
+                words = "Dog, Cat, Bird, Fish, Tiger"
+                answer = 'bird'
+            else:
+                words = "Car, Boat, Train, Airplane, Bicycle"
+                answer = 'bicycle'
+            
+            question = f"""Pattern Recognition - Classification
+
+Which word doesn't belong?
+
+{words}
+
+Type your answer:"""
+
+            return Exercise(
+                id=str(uuid.uuid4()),
+                category='pattern_recognition',
+                type='classification',
+                difficulty=difficulty,
+                question=question,
+                correct_answer=answer,
+                options=None,
+                time_limit_seconds=45,
+                hints=[
+                    "What do most of them have in common?",
+                    "Think about categories",
+                    "One is different from the others"
+                ]
+            )
+
+    def _visual_pattern(self, difficulty: int) -> Exercise:
+        """Generate visual pattern puzzle"""
+
+        patterns = {
+            1: {
+                'pattern': ['■', '□', '■', '□', '?'],
+                'answer': '■',
+                'description': 'Alternating filled and empty squares'
+            },
+            2: {
+                'pattern': ['●', '●', '○', '●', '●', '?'],
+                'answer': '○',
+                'description': 'Two filled, one empty, repeating'
+            },
+            3: {
+                'pattern': ['▲', '■', '●', '▲', '?'],
+                'answer': '■',
+                'description': 'Shape sequence: triangle, square, circle, repeat'
+            },
+            4: {
+                'pattern': ['A', 'C', 'E', 'G', '?'],
+                'answer': 'I',
+                'description': 'Skip letters: A, skip B, C, skip D, etc.'
+            },
+            5: {
+                'pattern': ['1', '1', '2', '3', '5', '?'],
+                'answer': '8',
+                'description': 'Fibonacci sequence with numbers'
+            }
+        }
+
+        pattern = patterns.get(difficulty, patterns[3])
+
+        question = f"""Pattern Recognition - Visual Pattern
+
+What symbol comes next?
+
+{' '.join(pattern['pattern'])}
+
+Type your answer (just the symbol):"""
+
+        return Exercise(
+            id=str(uuid.uuid4()),
+            category='pattern_recognition',
+            type='visual_pattern',
+            difficulty=difficulty,
+            question=question,
+            correct_answer=pattern['answer'],
+            options=None,
+            time_limit_seconds=60 + difficulty * 15,
+            hints=[
+                "Look for repeating sequences",
+                "Consider the position in the pattern",
+                f"Pattern hint: {pattern['description'][:3]}..."
+            ]
+        )
+
+    def _sequence_completion(self, difficulty: int) -> Exercise:
+        """Generate sequence completion puzzle"""
 
         sequences = {
             1: {
-                'sequence': [2, 4, 6, 8, '?'],
-                'answer': '10',
-                'pattern': 'Add 2'
+                'sequence': ['A', 'B', 'D', 'G', '?'],
+                'answer': 'K',
+                'pattern': 'Add 1, 2, 3, 4 letters (A+1=B, B+2=D, D+3=G, G+4=K)'
             },
             2: {
-                'sequence': [3, 6, 12, 24, '?'],
-                'answer': '48',
-                'pattern': 'Multiply by 2'
+                'sequence': [2, 6, 18, 54, '?'],
+                'answer': '162',
+                'pattern': 'Multiply by 3 each time'
             },
             3: {
-                'sequence': [1, 1, 2, 3, 5, 8, '?'],
-                'answer': '13',
-                'pattern': 'Fibonacci'
-            },
-            4: {
-                'sequence': [2, 3, 5, 7, 11, '?'],
-                'answer': '13',
-                'pattern': 'Prime numbers'
-            },
-            5: {
                 'sequence': [1, 4, 9, 16, 25, '?'],
                 'answer': '36',
-                'pattern': 'Perfect squares'
+                'pattern': 'Perfect squares (1², 2², 3², 4², 5²)'
+            },
+            4: {
+                'sequence': ['X', 'Y', 'A', 'B', '?'],
+                'answer': 'C',
+                'pattern': 'Alphabet sequence wrapping around (X,Y then A,B,C)'
+            },
+            5: {
+                'sequence': [1, 1, 2, 3, 5, 8, '?'],
+                'answer': '13',
+                'pattern': 'Fibonacci sequence (each number is sum of previous two)'
             }
         }
 
         seq = sequences.get(difficulty, sequences[3])
 
-        question = f"""Pattern Recognition - Number Sequence
+        question = f"""Pattern Recognition - Sequence Completion
 
-What number comes next?
+What comes next?
 
 {', '.join([str(x) for x in seq['sequence']])}
 
-Type your answer (just the number):"""
+Type your answer:"""
 
         return Exercise(
             id=str(uuid.uuid4()),
             category='pattern_recognition',
-            type='number_sequence',
+            type='sequence_completion',
             difficulty=difficulty,
             question=question,
             correct_answer=seq['answer'],
             options=None,
             time_limit_seconds=60 + difficulty * 15,
             hints=[
-                "Look for arithmetic patterns",
-                "Try differences between numbers",
+                "Look for mathematical relationships",
+                "Check for arithmetic progressions",
                 f"Pattern hint: {seq['pattern'][:3]}..."
             ]
         )
 
-    def _analogy(self, difficulty: int) -> Exercise:
-        """Generate analogy puzzle"""
-
-        analogies = {
-            1: {
-                'premise': "Hot is to Cold as Up is to ___",
-                'answer': 'down'
-            },
-            2: {
-                'premise': "Pen is to Writer as Brush is to ___",
-                'answer': 'painter'
-            },
-            3: {
-                'premise': "Book is to Library as Painting is to ___",
-                'answer': 'gallery'
-            },
-            4: {
-                'premise': "Engine is to Car as Processor is to ___",
-                'answer': 'computer'
-            },
-            5: {
-                'premise': "Hypothesis is to Theory as Sketch is to ___",
-                'answer': 'masterpiece'
-            }
-        }
-
-        analogy = analogies.get(difficulty, analogies[3])
-
-        question = f"""Pattern Recognition - Analogy
-
-Complete the analogy:
-
-{analogy['premise']}
-
-Type your answer:"""
-
-        return Exercise(
-            id=str(uuid.uuid4()),
-            category='pattern_recognition',
-            type='analogy',
-            difficulty=difficulty,
-            question=question,
-            correct_answer=analogy['answer'],
-            options=None,
-            time_limit_seconds=60,
-            hints=[
-                "What's the relationship?",
-                "Think about function or purpose",
-                "Consider the context"
-            ]
-        )
-
-    def _classification(self, difficulty: int) -> Exercise:
-        """Generate classification puzzle"""
-
-        question = f"""Pattern Recognition - Classification
-
-Which word doesn't belong?
-
-Apple, Banana, Carrot, Orange, Grape
-
-Type your answer:"""
-
-        return Exercise(
-            id=str(uuid.uuid4()),
-            category='pattern_recognition',
-            type='classification',
-            difficulty=difficulty,
-            question=question,
-            correct_answer='carrot',
-            options=None,
-            time_limit_seconds=45,
-            hints=[
-                "What do most of them have in common?",
-                "Think about categories",
-                "One is different from the others"
-            ]
-        )
-
     async def validate(self, correct_answer: Any, user_answer: Any) -> bool:
-        """Validate pattern recognition answer"""
-        return str(user_answer).strip().lower() == str(correct_answer).strip().lower()
+        """Validate pattern recognition answer using LLM for semantic understanding"""
+        
+        # If no LLM client, fall back to exact matching
+        if not self.client:
+            return str(user_answer).strip().lower() == str(correct_answer).strip().lower()
+        
+        # Use LLM for semantic validation
+        return await self._validate_llm_pattern_answer(correct_answer, user_answer)
+    
+    async def _validate_llm_pattern_answer(self, correct_answer: Any, user_answer: Any) -> bool:
+        """Validate pattern recognition answer using LLM semantic understanding"""
+        
+        try:
+            # Create a validation prompt for LLM
+            validation_prompt = [{
+                'role': 'system',
+                'content': f"""You are a pattern recognition exercise validator. Determine if the user's answer is logically correct for the given pattern.
+
+User's answer: "{user_answer}"
+Correct answer: "{correct_answer}"
+
+Evaluate if the user's answer is semantically equivalent or logically correct compared to the correct answer. Consider:
+1. Synonyms and alternative phrasings
+2. Pattern correctness regardless of exact wording
+3. Case insensitivity
+4. Numerical answers with different formatting
+5. Pattern completion that follows the same rule
+
+Respond with ONLY "correct" if the answer is logically correct, or "incorrect" if it's wrong."""
+            }]
+            
+            response = await self.client._make_request(
+                model=self.client.config.fallback_model,  # Use cheaper model for validation
+                messages=validation_prompt,
+                temperature=0.1,  # Low temperature for consistent validation
+                max_tokens=10
+            )
+            
+            result_text = response['choices'][0]['message']['content'].strip().lower()
+            
+            logger.debug(
+                "llm_pattern_validation_result",
+                user_answer=user_answer,
+                correct_answer=correct_answer,
+                llm_result=result_text
+            )
+            
+            return 'incorrect' not in result_text
+            
+        except Exception as e:
+            logger.warning(
+                "llm_pattern_validation_failed",
+                error=str(e),
+                falling_back_to_exact_match=True,
+                user_answer=user_answer,
+                correct_answer=correct_answer
+            )
+            # Fall back to exact matching if LLM validation fails
+            return str(user_answer).strip().lower() == str(correct_answer).strip().lower()
 
 
 class AttentionExerciseGenerator:

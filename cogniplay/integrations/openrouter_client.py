@@ -212,6 +212,76 @@ class OpenRouterClient:
             
             raise
 
+    async def generate_pattern_recognition_exercise(
+        self,
+        exercise_type: str,
+        difficulty: int
+    ) -> Dict[str, Any]:
+        """Generate pattern recognition exercise using LLM"""
+
+        # Validate exercise type
+        valid_exercise_types = ['number_sequence', 'analogy', 'classification', 'visual_pattern', 'sequence_completion']
+        if exercise_type not in valid_exercise_types:
+            raise ValueError(f"Invalid exercise type: {exercise_type}. Must be one of: {valid_exercise_types}")
+
+        # Validate difficulty
+        if not isinstance(difficulty, int) or difficulty < 1 or difficulty > 5:
+            raise ValueError(f"Difficulty must be an integer between 1 and 5, got: {difficulty}")
+
+        prompt = self._build_pattern_recognition_prompt(
+            exercise_type, difficulty
+        )
+
+        try:
+            response = await self._make_request(
+                model=self.config.primary_model,
+                messages=prompt,
+                temperature=0.8,
+                max_tokens=500
+            )
+
+            parsed_response = self._parse_pattern_recognition_response(response)
+
+            logger.info(
+                "pattern_recognition_exercise_generated",
+                exercise_type=exercise_type,
+                difficulty=difficulty,
+                tokens=response.get('usage', {}).get('total_tokens'),
+                model=self.config.primary_model
+            )
+
+            return parsed_response
+
+        except Exception as e:
+            logger.error(
+                "pattern_recognition_generation_failed",
+                error=str(e),
+                exercise_type=exercise_type,
+                difficulty=difficulty,
+                model=self.config.primary_model
+            )
+
+            # Fallback to simpler model
+            if self.config.primary_model != self.config.fallback_model:
+                logger.info("falling_back_to_backup_model_for_pattern_recognition")
+                try:
+                    response = await self._make_request(
+                        model=self.config.fallback_model,
+                        messages=prompt,
+                        temperature=0.8,
+                        max_tokens=500
+                    )
+                    return self._parse_pattern_recognition_response(response)
+                except Exception as fallback_error:
+                    logger.error(
+                        "fallback_model_also_failed",
+                        error=str(fallback_error),
+                        exercise_type=exercise_type,
+                        difficulty=difficulty
+                    )
+            
+            raise
+
     async def _make_request(
         self,
         model: str,
@@ -492,6 +562,123 @@ Format your response as JSON:
 }}"""
 
         return [{"role": "system", "content": system_prompt}]
+
+    def _build_pattern_recognition_prompt(
+        self,
+        exercise_type: str,
+        difficulty: int
+    ) -> list:
+        """Build prompt for pattern recognition exercise generation"""
+
+        difficulty_descriptions = {
+            1: "Simple, straightforward patterns with clear rules and obvious next elements",
+            2: "Moderate complexity with some intermediate steps and multiple pattern types",
+            3: "Moderately complex patterns requiring analysis of multiple relationships",
+            4: "Challenging patterns with multiple layers and abstract relationships",
+            5: "Highly complex patterns with advanced mathematical or logical reasoning"
+        }
+
+        type_specific_instructions = {
+            'number_sequence': """Create a number sequence puzzle with a clear mathematical pattern.
+                               Include 4-5 numbers with one missing element at the end.
+                               Ensure the pattern is solvable and has a logical progression.""",
+            'analogy': """Create an analogy puzzle showing relationships between concepts.
+                        Format: 'A is to B as C is to ___' or similar patterns.
+                        Use clear, relatable concepts with logical relationships.""",
+            'classification': """Create a classification puzzle where items need to be grouped or one item doesn't belong.
+                               Provide 4-5 items with clear logical categories.
+                               Make the classification rule clear but not obvious.""",
+            'visual_pattern': """Create a visual pattern description using text symbols or shapes.
+                               Describe a 2D pattern with clear progression rules.
+                               Use simple geometric shapes or symbols that can be easily visualized.""",
+            'sequence_completion': """Create a sequence completion puzzle with mixed elements.
+                                    Combine numbers, letters, or symbols in a logical sequence.
+                                    Include 3-4 elements with one missing to complete the pattern."""
+        }
+
+        system_prompt = f"""Generate a {exercise_type} pattern recognition exercise for cognitive training.
+
+Exercise Type: {exercise_type}
+Difficulty Level: {difficulty}/5 - {difficulty_descriptions.get(difficulty, '')}
+
+Specific Instructions:
+{type_specific_instructions.get(exercise_type, 'Create an engaging pattern recognition puzzle.')}
+
+Requirements:
+1. Create a clear, challenging but solvable pattern
+2. Provide a definitive correct answer
+3. Include 2-3 helpful hints that guide without giving away the answer
+4. Set appropriate time limits based on difficulty
+5. For multiple choice questions, provide realistic but incorrect distractors
+6. Ensure the pattern follows logical rules and is educational
+
+Format your response as JSON:
+{{
+  "question": "The pattern recognition question with full context",
+  "answer": "The correct answer",
+  "options": ["option1", "option2", "option3"], // for multiple choice only
+  "hints": ["hint1", "hint2", "hint3"],
+  "pattern_explanation": "Brief explanation of the pattern rule"
+}}"""
+
+        return [{"role": "system", "content": system_prompt}]
+
+    def _parse_pattern_recognition_response(self, response: Dict) -> Dict[str, Any]:
+        """Parse pattern recognition exercise generation response"""
+
+        content = response['choices'][0]['message']['content']
+
+        try:
+            import json
+            import re
+
+            # Remove markdown code blocks if present
+            content = content.strip()
+
+            # Remove any text before the first { or [
+            json_start = content.find('{')
+            if json_start == -1:
+                json_start = content.find('[')
+            if json_start > 0:
+                content = content[json_start:]
+
+            # Remove any text after the last } or ]
+            json_end = content.rfind('}')
+            if json_end == -1:
+                json_end = content.rfind(']')
+            if json_end >= 0:
+                content = content[:json_end + 1]
+
+            # Remove any remaining markdown formatting
+            content = re.sub(r'```\w*\n?', '', content)
+
+            # Clean up common LLM JSON issues
+            # Remove JavaScript-style comments
+            content = re.sub(r'//.*?$', '', content, flags=re.MULTILINE)
+            # Remove trailing commas before closing brackets/braces
+            content = re.sub(r',(\s*[}\]])', r'\1', content)
+            # Fix common escaping issues
+            content = content.replace('\\n', ' ').replace('\\"', '"')
+            # Remove extra whitespace that might cause issues
+            content = re.sub(r'\s+', ' ', content).strip()
+
+            parsed_data = json.loads(content)
+
+            # Ensure all required fields are present with defaults
+            return {
+                'question': parsed_data.get('question', ''),
+                'answer': parsed_data.get('answer', ''),
+                'options': parsed_data.get('options'),
+                'hints': parsed_data.get('hints', []),
+                'pattern_explanation': parsed_data.get('pattern_explanation', '')
+            }
+
+        except json.JSONDecodeError as e:
+            logger.error("pattern_recognition_parse_failed", content=content, error=str(e))
+            raise
+        except Exception as e:
+            logger.error("pattern_recognition_parse_error", content=content, error=str(e))
+            raise
 
     def _parse_problem_solving_response(self, response: Dict) -> Dict[str, Any]:
         """Parse problem-solving exercise generation response"""
