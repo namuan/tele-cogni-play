@@ -20,6 +20,17 @@ class OpenRouterClient:
 
     def __init__(self, config: OpenRouterConfig):
         self.config = config
+        # Log API key configuration status (masked for security)
+        api_key_masked = f"{config.api_key[:8]}...{config.api_key[-4:]}" if len(config.api_key) > 12 else "***"
+        logger.info(
+            "openrouter_config_loaded",
+            api_key_prefix=api_key_masked,
+            base_url=config.base_url,
+            primary_model=config.primary_model,
+            timeout=config.timeout,
+            max_retries=config.max_retries
+        )
+        
         self.client = httpx.AsyncClient(
             base_url=config.base_url,
             timeout=config.timeout,

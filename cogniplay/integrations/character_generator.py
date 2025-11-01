@@ -2,6 +2,8 @@ import uuid
 import structlog
 from typing import Dict, List, Any, Optional
 from datetime import datetime
+
+from cogniplay.data.repositories import CharacterRepository
 from cogniplay.database.connection import DatabaseConnection
 
 logger = structlog.get_logger()
@@ -12,7 +14,7 @@ class CharacterGenerator:
     def __init__(
         self,
         openrouter_client,
-        character_repository: DatabaseConnection
+        character_repository: CharacterRepository,
     ):
         self.client = openrouter_client
         self.repository = character_repository

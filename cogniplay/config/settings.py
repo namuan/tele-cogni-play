@@ -5,11 +5,11 @@ class Settings(BaseSettings):
     """Application settings"""
 
     # Telegram Configuration
-    telegram_bot_token: str
-    telegram_user_id: int
+    telegram_bot_token: str = None
+    telegram_user_id: int = -1
 
     # OpenRouter Configuration
-    openrouter_api_key: str
+    openrouter_api_key: str = None
     openrouter_primary_model: str = "anthropic/claude-3.5-sonnet"
     openrouter_fallback_model: str = "anthropic/claude-3-haiku"
 
