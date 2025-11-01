@@ -282,6 +282,76 @@ class OpenRouterClient:
             
             raise
 
+    async def generate_memory_exercise(
+        self,
+        exercise_type: str,
+        difficulty: int
+    ) -> Dict[str, Any]:
+        """Generate memory exercise using LLM"""
+
+        # Validate exercise type
+        valid_exercise_types = ['sequence_recall', 'word_list', 'number_memory', 'pattern_memory']
+        if exercise_type not in valid_exercise_types:
+            raise ValueError(f"Invalid exercise type: {exercise_type}. Must be one of: {valid_exercise_types}")
+
+        # Validate difficulty
+        if not isinstance(difficulty, int) or difficulty < 1 or difficulty > 5:
+            raise ValueError(f"Difficulty must be an integer between 1 and 5, got: {difficulty}")
+
+        prompt = self._build_memory_exercise_prompt(
+            exercise_type, difficulty
+        )
+
+        try:
+            response = await self._make_request(
+                model=self.config.primary_model,
+                messages=prompt,
+                temperature=0.8,
+                max_tokens=500
+            )
+
+            parsed_response = self._parse_memory_exercise_response(response)
+
+            logger.info(
+                "memory_exercise_generated",
+                exercise_type=exercise_type,
+                difficulty=difficulty,
+                tokens=response.get('usage', {}).get('total_tokens'),
+                model=self.config.primary_model
+            )
+
+            return parsed_response
+
+        except Exception as e:
+            logger.error(
+                "memory_exercise_generation_failed",
+                error=str(e),
+                exercise_type=exercise_type,
+                difficulty=difficulty,
+                model=self.config.primary_model
+            )
+
+            # Fallback to simpler model
+            if self.config.primary_model != self.config.fallback_model:
+                logger.info("falling_back_to_backup_model_for_memory")
+                try:
+                    response = await self._make_request(
+                        model=self.config.fallback_model,
+                        messages=prompt,
+                        temperature=0.8,
+                        max_tokens=500
+                    )
+                    return self._parse_memory_exercise_response(response)
+                except Exception as fallback_error:
+                    logger.error(
+                        "fallback_model_also_failed_for_memory",
+                        error=str(fallback_error),
+                        exercise_type=exercise_type,
+                        difficulty=difficulty
+                    )
+            
+            raise
+
     async def generate_attention_exercise(
         self,
         exercise_type: str,
@@ -403,6 +473,120 @@ Format your response as JSON:
 }}"""
 
         return [{"role": "system", "content": system_prompt}]
+
+    def _build_memory_exercise_prompt(
+        self,
+        exercise_type: str,
+        difficulty: int
+    ) -> list:
+        """Build prompt for memory exercise generation"""
+
+        difficulty_descriptions = {
+            1: "Simple memory tasks with short sequences and minimal items to remember",
+            2: "Moderate complexity with slightly longer sequences and more items",
+            3: "Complex memory tasks requiring sustained attention and multiple items",
+            4: "Challenging exercises with longer sequences and complex patterns",
+            5: "Highly complex memory tasks with maximum cognitive load and extensive sequences"
+        }
+
+        type_specific_instructions = {
+            'sequence_recall': """Create a sequence recall exercise where users must remember and reproduce a sequence of symbols, colors, or items.
+                                  Include clear display time and format instructions.""",
+            'word_list': """Create a word list memory exercise where users study a list of words and must recall them later.
+                           Include study time recommendations and format instructions for recall.""",
+            'number_memory': """Create a number sequence memory exercise where users must remember and reproduce number sequences.
+                               Include appropriate length based on difficulty and clear recall instructions.""",
+            'pattern_memory': """Create a visual pattern memory exercise where users study a grid pattern and must recreate it.
+                                Include clear grid dimensions and reproduction instructions."""
+        }
+
+        system_prompt = f"""Generate a {exercise_type} memory exercise for cognitive training.
+
+Exercise Type: {exercise_type}
+Difficulty Level: {difficulty}/5 - {difficulty_descriptions.get(difficulty, '')}
+
+Specific Instructions:
+{type_specific_instructions.get(exercise_type, 'Create an engaging memory exercise.')}
+
+Requirements:
+1. Create a clear memory task that challenges working memory capacity
+2. Include specific instructions for study time and recall format
+3. Provide a definitive correct answer based on the memory requirement
+4. Include 2-3 helpful hints that guide memory without giving away the answer
+5. Set appropriate time limits based on difficulty and memory load
+6. For multiple choice questions, provide realistic but incorrect distractors
+7. Ensure the exercise genuinely tests memory and recall abilities
+8. Scale the memory load (sequence length, number of items, etc.) with difficulty
+
+Format your response as JSON:
+{{
+  "question": "The memory exercise with full context, study instructions, and recall format",
+  "answer": "The correct answer that should be recalled",
+  "options": ["option1", "option2", "option3"], // for multiple choice only
+  "hints": ["hint1", "hint2", "hint3"],
+  "study_time_seconds": X, // suggested study time in seconds
+  "memory_load": "Brief description of what needs to be remembered"
+}}"""
+
+        return [{"role": "system", "content": system_prompt}]
+
+    def _parse_memory_exercise_response(self, response: Dict) -> Dict[str, Any]:
+        """Parse memory exercise generation response"""
+
+        content = response['choices'][0]['message']['content']
+
+        try:
+            import json
+            import re
+
+            # Remove markdown code blocks if present
+            content = content.strip()
+
+            # Remove any text before the first { or [
+            json_start = content.find('{')
+            if json_start == -1:
+                json_start = content.find('[')
+            if json_start > 0:
+                content = content[json_start:]
+
+            # Remove any text after the last } or ]
+            json_end = content.rfind('}')
+            if json_end == -1:
+                json_end = content.rfind(']')
+            if json_end >= 0:
+                content = content[:json_end + 1]
+
+            # Remove any remaining markdown formatting
+            content = re.sub(r'```\w*\n?', '', content)
+
+            # Clean up common LLM JSON issues
+            # Remove JavaScript-style comments
+            content = re.sub(r'//.*?$', '', content, flags=re.MULTILINE)
+            # Remove trailing commas before closing brackets/braces
+            content = re.sub(r',(\s*[}\]])', r'\1', content)
+            # Fix common escaping issues
+            content = content.replace('\\n', ' ').replace('\\"', '"')
+            # Remove extra whitespace that might cause issues
+            content = re.sub(r'\s+', ' ', content).strip()
+
+            parsed_data = json.loads(content)
+
+            # Ensure all required fields are present with defaults
+            return {
+                'question': parsed_data.get('question', ''),
+                'answer': parsed_data.get('answer', ''),
+                'options': parsed_data.get('options'),
+                'hints': parsed_data.get('hints', []),
+                'study_time_seconds': parsed_data.get('study_time_seconds'),
+                'memory_load': parsed_data.get('memory_load', '')
+            }
+
+        except json.JSONDecodeError as e:
+            logger.error("memory_exercise_parse_failed", content=content, error=str(e))
+            raise
+        except Exception as e:
+            logger.error("memory_exercise_parse_error", content=content, error=str(e))
+            raise
 
     def _parse_attention_exercise_response(self, response: Dict) -> Dict[str, Any]:
         """Parse attention exercise generation response"""

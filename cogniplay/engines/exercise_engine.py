@@ -14,7 +14,7 @@ class ExerciseEngine:
     def __init__(self, openrouter_client=None):
         self.client = openrouter_client
         self.generators = {
-            'memory': MemoryExerciseGenerator(),
+            'memory': MemoryExerciseGenerator(openrouter_client),
             'logic': LogicExerciseGenerator(openrouter_client),
             'problem_solving': ProblemSolvingGenerator(openrouter_client),
             'pattern_recognition': PatternRecognitionGenerator(openrouter_client),
@@ -125,193 +125,350 @@ class ExerciseEngine:
 
 
 class MemoryExerciseGenerator:
-    """Generate memory exercises"""
+    """Generate memory exercises using LLM with fallback to hardcoded exercises"""
+
+    def __init__(self, openrouter_client: OpenRouterClient):
+        self.client = openrouter_client
 
     async def generate(self, difficulty: int) -> Exercise:
-        """Generate memory exercise based on difficulty"""
+        """Generate memory exercise using LLM with fallback to hardcoded exercises"""
+
+        # If no LLM client, fall back to hardcoded exercises
+        if not self.client:
+            logger.info("no_llm_client_falling_back_to_hardcoded_memory")
+            exercise_types = [
+                "sequence_recall",
+                "word_list",
+                "number_memory",
+                "pattern_memory"
+            ]
+            exercise_type = random.choice(exercise_types)
+            return self._generate_hardcoded_memory_exercise(exercise_type, difficulty)
+
+        # Use LLM to generate dynamic exercise
+        try:
+            return await self._generate_llm_exercise(difficulty)
+        except Exception as e:
+            logger.warning(
+                "llm_memory_generation_failed",
+                error=str(e),
+                difficulty=difficulty,
+                falling_back_to_hardcoded=True
+            )
+            # Fall back to hardcoded generator
+            exercise_types = [
+                "sequence_recall",
+                "word_list",
+                "number_memory",
+                "pattern_memory"
+            ]
+            exercise_type = random.choice(exercise_types)
+            return self._generate_hardcoded_memory_exercise(exercise_type, difficulty)
+
+    async def _generate_llm_exercise(self, difficulty: int) -> Exercise:
+        """Generate memory exercise using LLM"""
 
         exercise_types = [
-            self._sequence_recall,
-            self._word_list,
-            self._number_memory,
-            self._pattern_memory
+            "sequence_recall",
+            "word_list",
+            "number_memory",
+            "pattern_memory"
         ]
 
-        # Select random exercise type
-        generator_func = random.choice(exercise_types)
-        return generator_func(difficulty)
+        exercise_type = random.choice(exercise_types)
 
-    def _sequence_recall(self, difficulty: int) -> Exercise:
-        """Generate sequence recall exercise"""
+        # Generate exercise via LLM
+        exercise_data = await self.client.generate_memory_exercise(
+            exercise_type,
+            difficulty
+        )
 
-        # Sequence length based on difficulty
-        length_map = {1: 3, 2: 4, 3: 6, 4: 8, 5: 10}
-        length = length_map.get(difficulty, 5)
+        # Create Exercise object from LLM data
+        return Exercise(
+            id=str(uuid.uuid4()),
+            category='memory',
+            type=exercise_type,
+            difficulty=difficulty,
+            question=exercise_data['question'],
+            correct_answer=exercise_data['answer'],
+            options=exercise_data.get('options'),
+            time_limit_seconds=60 + difficulty * 15,
+            hints=exercise_data.get('hints', [
+                "Focus on the material to remember",
+                "Use memory techniques like chunking",
+                "Take your time to encode the information"
+            ])
+        )
 
-        # Generate random sequence
-        items = ['🔴', '🔵', '🟢', '🟡', '🟣', '🟠', '⚫', '⚪']
-        sequence = [random.choice(items) for _ in range(length)]
+    def _generate_hardcoded_memory_exercise(self, exercise_type: str, difficulty: int) -> Exercise:
+        """Generate hardcoded memory exercise for fallback"""
+        
+        if exercise_type == "sequence_recall":
+            if difficulty <= 2:
+                # Simple sequence of colors or symbols
+                sequence = ["🔴", "🔵", "🟢", "🟡"]
+                question = f"""Memory Challenge - Sequence Recall
 
-        question = f"""Memory Challenge - Sequence Recall
-
-Study this sequence for {5 + difficulty} seconds:
+Study this sequence carefully for 8 seconds:
 
 {' '.join(sequence)}
 
-After the time is up, type the sequence back exactly as shown (include spaces between items)."""
+After the time is up, type the sequence back exactly as shown.
 
-        return Exercise(
-            id=str(uuid.uuid4()),
-            category='memory',
-            type='sequence_recall',
-            difficulty=difficulty,
-            question=question,
-            correct_answer=' '.join(sequence),
-            options=None,
-            time_limit_seconds=60,
-            hints=[
-                f"The sequence has {length} items",
-                f"It starts with {sequence[0]}",
-                f"It ends with {sequence[-1]}"
-            ]
-        )
+Type your answer:"""
+                correct_answer = ' '.join(sequence)
+                hints = ["The sequence has 4 items", "It includes colors you know", "The first item is 🔴"]
+            elif difficulty <= 4:
+                # More complex sequence with shapes and letters
+                sequence = ["A", "🔺", "B", "🔻", "C"]
+                question = f"""Memory Challenge - Sequence Recall
 
-    def _word_list(self, difficulty: int) -> Exercise:
-        """Generate word list memory exercise"""
+Study this sequence carefully for 10 seconds:
 
-        count_map = {1: 5, 2: 7, 3: 10, 4: 15, 5: 20}
-        count = count_map.get(difficulty, 10)
+{' '.join(sequence)}
 
-        word_pool = [
-            'apple', 'mountain', 'computer', 'elephant', 'guitar',
-            'ocean', 'bicycle', 'telephone', 'butterfly', 'camera',
-            'pizza', 'rocket', 'library', 'diamond', 'forest',
-            'lighthouse', 'saxophone', 'tornado', 'universe', 'waterfall',
-            'microscope', 'adventure', 'sculpture', 'harmony', 'eclipse'
-        ]
+After the time is up, type the sequence back exactly as shown.
 
-        words = random.sample(word_pool, count)
+Type your answer:"""
+                correct_answer = ' '.join(sequence)
+                hints = ["The sequence has 5 items", "It alternates letters and shapes", "It starts with A"]
+            else:
+                # Complex sequence with numbers and symbols
+                sequence = ["1", "⚡", "2", "🔥", "3", "💧", "4"]
+                question = f"""Memory Challenge - Sequence Recall
 
-        question = f"""Memory Challenge - Word List
+Study this sequence carefully for 12 seconds:
 
-Study these {count} words for {10 + difficulty * 2} seconds:
+{' '.join(sequence)}
+
+After the time is up, type the sequence back exactly as shown.
+
+Type your answer:"""
+                correct_answer = ' '.join(sequence)
+                hints = ["The sequence has 7 items", "It alternates numbers and symbols", "It ends with the number 4"]
+        
+        elif exercise_type == "word_list":
+            if difficulty <= 2:
+                # Simple word list
+                words = ["apple", "book", "car", "dog", "house"]
+                question = f"""Memory Challenge - Word List
+
+Study these words carefully for 10 seconds:
 
 {', '.join(words)}
 
-After the time is up, type as many words as you can remember (separated by commas)."""
+After the time is up, type the words back in the same order, separated by commas.
 
-        return Exercise(
-            id=str(uuid.uuid4()),
-            category='memory',
-            type='word_list',
-            difficulty=difficulty,
-            question=question,
-            correct_answer=words,
-            options=None,
-            time_limit_seconds=120,
-            hints=[
-                f"There were {count} words total",
-                f"One word started with '{words[0][0]}'",
-                f"One word was '{words[random.randint(0, len(words)-1)]}'"
+Type your answer:"""
+                correct_answer = ', '.join(words)
+                hints = ["There are 5 words", "They are everyday objects", "Apple comes first"]
+            elif difficulty <= 4:
+                # Medium word list with themes
+                words = ["sky", "river", "mountain", "forest", "desert", "ocean"]
+                question = f"""Memory Challenge - Word List
+
+Study these words carefully for 12 seconds:
+
+{', '.join(words)}
+
+After the time is up, type the words back in the same order, separated by commas.
+
+Type your answer:"""
+                correct_answer = ', '.join(words)
+                hints = ["There are 6 words", "They're all geographical features", "Sky comes first"]
+            else:
+                # Complex word list
+                words = ["algorithm", "syntax", "function", "variable", "loop", "array", "object", "class"]
+                question = f"""Memory Challenge - Word List
+
+Study these words carefully for 15 seconds:
+
+{', '.join(words)}
+
+After the time is up, type the words back in the same order, separated by commas.
+
+Type your answer:"""
+                correct_answer = ', '.join(words)
+                hints = ["There are 8 words", "They're all programming terms", "Algorithm comes first"]
+        
+        elif exercise_type == "number_memory":
+            if difficulty <= 2:
+                # Short number sequence
+                numbers = [3, 7, 1, 9]
+                question = f"""Memory Challenge - Number Memory
+
+Study this number sequence carefully for 8 seconds:
+
+{' '.join(map(str, numbers))}
+
+After the time is up, type the numbers back in the same order, separated by spaces.
+
+Type your answer:"""
+                correct_answer = ' '.join(map(str, numbers))
+                hints = ["There are 4 numbers", "The first number is 3", "Think of them as a phone number"]
+            elif difficulty <= 4:
+                # Medium number sequence
+                numbers = [4, 1, 9, 2, 8, 5]
+                question = f"""Memory Challenge - Number Memory
+
+Study this number sequence carefully for 12 seconds:
+
+{' '.join(map(str, numbers))}
+
+After the time is up, type the numbers back in the same order, separated by spaces.
+
+Type your answer:"""
+                correct_answer = ' '.join(map(str, numbers))
+                hints = ["There are 6 numbers", "The first number is 4", "Look for patterns or groupings"]
+            else:
+                # Complex number sequence
+                numbers = [7, 3, 9, 1, 5, 2, 8, 4, 6]
+                question = f"""Memory Challenge - Number Memory
+
+Study this number sequence carefully for 15 seconds:
+
+{' '.join(map(str, numbers))}
+
+After the time is up, type the numbers back in the same order, separated by spaces.
+
+Type your answer:"""
+                correct_answer = ' '.join(map(str, numbers))
+                hints = ["There are 9 numbers", "The first number is 7", "Try to chunk them into smaller groups"]
+        
+        elif exercise_type == "pattern_memory":
+            if difficulty <= 2:
+                # Simple 2x2 pattern
+                pattern = [["🔴", "🔵"], ["🟢", "🟡"]]
+                question = f"""Memory Challenge - Pattern Memory
+
+Study this 2x2 grid pattern carefully for 8 seconds:
+
+🔴 🔵
+🟢 🟡
+
+After the time is up, recreate the pattern in the same format.
+
+Type your answer:"""
+                correct_answer = "🔴 🔵\n🟢 🟡"
+                hints = ["It's a 2x2 grid", "Top-left is 🔴", "Bottom-right is 🟡"]
+            elif difficulty <= 4:
+                # Medium 3x3 pattern
+                pattern = [["A", "B", "C"], ["D", "E", "F"], ["G", "H", "I"]]
+                question = f"""Memory Challenge - Pattern Memory
+
+Study this 3x3 grid pattern carefully for 12 seconds:
+
+A B C
+D E F
+G H I
+
+After the time is up, recreate the pattern in the same format.
+
+Type your answer:"""
+                correct_answer = "A B C\nD E F\nG H I"
+                hints = ["It's a 3x3 grid", "The pattern follows the alphabet", "Center is E"]
+            else:
+                # Complex 4x4 pattern
+                pattern = [["1", "2", "3", "4"], ["5", "6", "7", "8"], ["9", "10", "11", "12"], ["13", "14", "15", "16"]]
+                question = f"""Memory Challenge - Pattern Memory
+
+Study this 4x4 grid pattern carefully for 15 seconds:
+
+1  2  3  4
+5  6  7  8
+9  10 11 12
+13 14 15 16
+
+After the time is up, recreate the pattern in the same format.
+
+Type your answer:"""
+                correct_answer = "1 2 3 4\n5 6 7 8\n9 10 11 12\n13 14 15 16"
+                hints = ["It's a 4x4 grid", "It's a number sequence", "Top-left is 1"]
+        
+        else:
+            # Default fallback
+            question = f"Memory Challenge - {exercise_type.replace('_', ' ').title()}\n\nComplete this {difficulty}-level memory exercise."
+            correct_answer = "memory answer"
+            hints = [
+                "Focus on the material to remember",
+                "Use memory techniques like chunking",
+                "Take your time to encode the information"
             ]
-        )
-
-    def _number_memory(self, difficulty: int) -> Exercise:
-        """Generate number sequence memory"""
-
-        length_map = {1: 4, 2: 6, 3: 8, 4: 10, 5: 12}
-        length = length_map.get(difficulty, 6)
-
-        number = ''.join([str(random.randint(0, 9)) for _ in range(length)])
-
-        question = f"""Memory Challenge - Number Sequence
-
-Remember this {length}-digit number:
-
-{number}
-
-Study it for {5 + difficulty} seconds, then type it back."""
 
         return Exercise(
             id=str(uuid.uuid4()),
             category='memory',
-            type='number_memory',
-            difficulty=difficulty,
-            question=question,
-            correct_answer=number,
-            options=None,
-            time_limit_seconds=45,
-            hints=[
-                f"The number has {length} digits",
-                f"First digit is {number[0]}",
-                f"Last digit is {number[-1]}"
-            ]
-        )
-
-    def _pattern_memory(self, difficulty: int) -> Exercise:
-        """Generate pattern memory exercise"""
-
-        size_map = {1: 2, 2: 3, 3: 4, 4: 4, 5: 5}
-        size = size_map.get(difficulty, 3)
-
-        # Create grid pattern
-        symbols = ['■', '□']
-        pattern = []
-        for i in range(size):
-            row = [random.choice(symbols) for _ in range(size)]
-            pattern.append(row)
-
-        # Format pattern display
-        pattern_str = '\n'.join([' '.join(row) for row in pattern])
-
-        # Flatten for answer
-        correct_answer = ''.join([''.join(row) for row in pattern])
-
-        question = f"""Memory Challenge - Pattern Memory
-
-Study this {size}x{size} pattern for {8 + difficulty * 2} seconds:
-
-{pattern_str}
-
-After time is up, recreate the pattern by typing the symbols row by row (no spaces).
-Use ■ for filled squares and □ for empty squares."""
-
-        return Exercise(
-            id=str(uuid.uuid4()),
-            category='memory',
-            type='pattern_memory',
+            type=exercise_type,
             difficulty=difficulty,
             question=question,
             correct_answer=correct_answer,
             options=None,
-            time_limit_seconds=90,
-            hints=[
-                f"It's a {size}x{size} grid",
-                f"Top-left corner is {pattern[0][0]}",
-                f"Bottom-right corner is {pattern[-1][-1]}"
-            ]
+            time_limit_seconds=60 + difficulty * 15,
+            hints=hints
         )
 
     async def validate(self, correct_answer: Any, user_answer: Any) -> bool:
-        """Validate memory exercise answer"""
+        """Validate memory exercise answer using LLM with fallback to exact matching"""
+        
+        # If no LLM client, fall back to exact matching
+        if not self.client:
+            return str(user_answer).strip().lower() == str(correct_answer).strip().lower()
+        
+        # Use LLM for semantic validation
+        return await self._validate_llm_memory_answer(correct_answer, user_answer)
+    
+    async def _validate_llm_memory_answer(self, correct_answer: Any, user_answer: Any) -> bool:
+        """Validate memory answer using LLM semantic understanding"""
+        
+        try:
+            # Create a validation prompt for LLM
+            validation_prompt = [{
+                'role': 'system',
+                'content': f"""You are a memory exercise validator. Determine if the user's answer is correct for the given memory exercise.
 
-        if isinstance(correct_answer, list):
-            # Word list - check how many words match
-            user_words = [w.strip().lower() for w in user_answer.split(',')]
-            correct_words = [w.lower() for w in correct_answer]
-            matches = sum(1 for w in user_words if w in correct_words)
-            # Consider correct if at least 70% remembered
-            return matches >= len(correct_words) * 0.7
-        else:
-            # Handle comma-separated answers with flexible spacing
-            if ',' in str(correct_answer) and ',' in str(user_answer):
-                correct_parts = [part.strip().lower() for part in str(correct_answer).split(',')]
-                user_parts = [part.strip().lower() for part in str(user_answer).split(',')]
-                # Check if all correct parts are present in user's answer (order doesn't matter)
-                return set(correct_parts) == set(user_parts)
-            else:
-                # Exact match for simple answers
-                return str(user_answer).strip().lower() == str(correct_answer).strip().lower()
+User's answer: "{user_answer}"
+Correct answer: "{correct_answer}"
+
+Evaluate if the user's answer is semantically equivalent or content-correct compared to the correct answer. Consider:
+1. Synonyms and alternative phrasings
+2. Order independence for memory recall exercises
+3. Case insensitivity
+4. Missing or extra words for word list exercises
+5. Number formatting differences
+6. For sequences: whether the essential elements are present even if order is slightly different
+7. For patterns: whether the structure and elements are correct regardless of exact formatting
+
+Respond with ONLY "correct" if the answer is content-correct, or "incorrect" if it's wrong."""
+            }]
+            
+            response = await self.client._make_request(
+                model=self.client.config.fallback_model,  # Use cheaper model for validation
+                messages=validation_prompt,
+                temperature=0.1,  # Low temperature for consistent validation
+                max_tokens=10
+            )
+            
+            result_text = response['choices'][0]['message']['content'].strip().lower()
+            
+            logger.debug(
+                "llm_memory_validation_result",
+                user_answer=user_answer,
+                correct_answer=correct_answer,
+                llm_result=result_text
+            )
+            
+            return 'incorrect' not in result_text
+            
+        except Exception as e:
+            logger.warning(
+                "llm_memory_validation_failed",
+                error=str(e),
+                falling_back_to_exact_match=True,
+                user_answer=user_answer,
+                correct_answer=correct_answer
+            )
+            # Fall back to exact matching if LLM validation fails
+            return str(user_answer).strip().lower() == str(correct_answer).strip().lower()
 
 
 class LogicExerciseGenerator:
