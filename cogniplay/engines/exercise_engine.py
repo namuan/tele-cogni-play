@@ -16,7 +16,7 @@ class ExerciseEngine:
         self.generators = {
             'memory': MemoryExerciseGenerator(),
             'logic': LogicExerciseGenerator(openrouter_client),
-            'problem_solving': ProblemSolvingGenerator(),
+            'problem_solving': ProblemSolvingGenerator(openrouter_client),
             'pattern_recognition': PatternRecognitionGenerator(),
             'attention': AttentionExerciseGenerator()
         }
@@ -671,183 +671,172 @@ Respond with ONLY "correct" if the answer is logically correct, or "incorrect" i
 class ProblemSolvingGenerator:
     """Generate problem-solving exercises"""
 
-    async def generate(self, difficulty: int) -> Exercise:
-        """Generate problem-solving exercise"""
+    def __init__(self, openrouter_client=None):
+        self.client = openrouter_client
 
-        exercise_types = [
-            self._optimization,
-            self._resource_allocation,
-            self._strategy,
-            self._multi_step
+    async def generate(self, difficulty: int) -> Exercise:
+        """Generate problem-solving exercise using LLM with fallback to generic exercises"""
+
+        # If no LLM client, fall back to generic exercises
+        if not self.client:
+            logger.info("no_llm_client_falling_back_to_generic")
+            problem_types = [
+                "optimization",
+                "resource_allocation",
+                "strategy",
+                "multi-step"
+            ]
+            problem_type = random.choice(problem_types)
+            return self._generate_generic_fallback_exercise(problem_type, difficulty)
+
+        # Use LLM to generate dynamic exercise
+        return await self._generate_llm_exercise(difficulty)
+
+    async def _generate_llm_exercise(self, difficulty: int) -> Exercise:
+        """Generate problem-solving exercise using LLM"""
+
+        problem_types = [
+            "optimization",
+            "resource_allocation",
+            "strategy",
+            "multi-step"
         ]
 
-        generator_func = random.choice(exercise_types)
-        return generator_func(difficulty)
+        problem_type = random.choice(problem_types)
 
-    def _optimization(self, difficulty: int) -> Exercise:
-        """Generate optimization problem"""
+        try:
+            # Generate exercise via LLM
+            exercise_data = await self.client.generate_problem_solving_exercise(
+                problem_type,
+                difficulty
+            )
 
-        problems = {
-            1: {
-                'scenario': "You need to pack 3 boxes. Box A holds 5 items, Box B holds 3 items, Box C holds 2 items. You have 8 items to pack.",
-                'question': "What's the minimum number of boxes needed?",
-                'answer': '2'
-            },
-            2: {
-                'scenario': "You're organizing a 3-hour meeting. Presentation: 45 min, Discussion: 60 min, Break: 15 min, Q&A: 30 min, Buffer time needed: 15 min.",
-                'question': "How many minutes over the 3-hour limit are you? (Enter 0 if under)",
-                'answer': '0'  # 45+60+15+30+15 = 165 min = 2h45min
-            },
-            3: {
-                'scenario': "A team needs to complete 5 tasks. Task dependencies: B needs A, D needs B and C, E needs D. Tasks take: A=2h, B=3h, C=4h, D=2h, E=1h.",
-                'question': "What's the minimum hours to complete all tasks with unlimited people?",
-                'answer': '8'  # Critical path: C(4) + D(2) + E(1) or A(2) + B(3) + D(2) + E(1) = 8
-            },
-            4: {
-                'scenario': "You have a budget of $1000. Item A costs $150 (value: 200), Item B costs $300 (value: 350), Item C costs $250 (value: 300), Item D costs $400 (value: 450).",
-                'question': "What's the maximum value you can achieve? (Just the number)",
-                'answer': '1050'  # A + B + C = 850
-            },
-            5: {
-                'scenario': "Schedule 5 meetings in 3 rooms over 2 days. M1: 2h (needs Room A), M2: 1h, M3: 3h (needs Room B), M4: 1.5h, M5: 2h. Each day is 8h. Rooms A, B, C available.",
-                'question': "What's the minimum number of time conflicts?",
-                'answer': '0'
-            }
+            # Create comprehensive question from scenario and question
+            full_question = f"Problem Solving - {problem_type.replace('_', ' ').title()}\n\n"
+            full_question += f"Scenario: {exercise_data['scenario']}\n\n"
+            full_question += f"Question: {exercise_data['question']}"
+
+            # Create Exercise object from LLM data
+            return Exercise(
+                id=str(uuid.uuid4()),
+                category='problem_solving',
+                type=problem_type,
+                difficulty=difficulty,
+                question=full_question,
+                correct_answer=exercise_data['correct_answer'],
+                options=exercise_data.get('options'),
+                time_limit_seconds=120 + difficulty * 30,
+                hints=exercise_data.get('hints', [
+                    "Think through the problem step by step",
+                    "Consider all available options",
+                    "Focus on the key constraints and objectives"
+                ])
+            )
+
+        except Exception as e:
+            logger.warning(
+                "llm_problem_solving_generation_failed",
+                error=str(e),
+                problem_type=problem_type,
+                difficulty=difficulty,
+                falling_back_to_generic=True
+            )
+            # Generate a simple fallback exercise directly
+            return self._generate_generic_fallback_exercise(problem_type, difficulty)
+    
+    def _generate_generic_fallback_exercise(self, problem_type: str, difficulty: int) -> Exercise:
+        """Generate a simple generic fallback exercise when LLM generation fails"""
+        
+        # Create a basic question for each problem type
+        questions = {
+            'optimization': f"Problem Solving - Optimization\n\nFind the optimal solution for this {difficulty}-level optimization problem.",
+            'resource_allocation': f"Problem Solving - Resource Allocation\n\nAllocate resources efficiently for this {difficulty}-level scenario.",
+            'strategy': f"Problem Solving - Strategy\n\nDevelop the best strategy for this {difficulty}-level challenge.",
+            'multi-step': f"Problem Solving - Multi-Step\n\nSolve this {difficulty}-level problem by breaking it down into steps."
         }
-
-        problem = problems.get(difficulty, problems[3])
-
-        question = f"""Problem Solving - Optimization
-
-{problem['scenario']}
-
-{problem['question']}"""
-
+        
+        question = questions.get(problem_type, questions['optimization'])
+        
         return Exercise(
             id=str(uuid.uuid4()),
             category='problem_solving',
-            type='optimization',
+            type=problem_type,
             difficulty=difficulty,
             question=question,
-            correct_answer=problem['answer'],
+            correct_answer="solution",  # Generic answer
             options=None,
             time_limit_seconds=120 + difficulty * 30,
             hints=[
-                "Write down all the constraints",
-                "Look for the critical path",
-                "Try different combinations"
+                "Think through the problem step by step",
+                "Consider all available options",
+                "Focus on the key constraints and objectives"
             ]
         )
 
-    def _resource_allocation(self, difficulty: int) -> Exercise:
-        """Generate resource allocation problem"""
 
-        question = f"""Problem Solving - Resource Allocation
 
-You manage 3 team members (Alice, Bob, Carol) for 2 projects.
 
-Project 1 needs: 2 people for 3 days
-Project 2 needs: 2 people for 2 days
-
-Alice is available all 5 days
-Bob is available days 1-3
-Carol is available days 2-5
-
-Question: Can both projects be completed? (yes/no)"""
-
-        return Exercise(
-            id=str(uuid.uuid4()),
-            category='problem_solving',
-            type='resource_allocation',
-            difficulty=difficulty,
-            question=question,
-            correct_answer='yes',
-            options=['yes', 'no'],
-            time_limit_seconds=90 + difficulty * 20,
-            hints=[
-                "Draw a timeline",
-                "Check each person's availability",
-                "See if schedules overlap properly"
-            ]
-        )
-
-    def _strategy(self, difficulty: int) -> Exercise:
-        """Generate strategy problem"""
-
-        question = f"""Problem Solving - Strategy
-
-You're launching a new product. You have 3 marketing channels:
-- Social Media: Reaches 10k people, costs $500, 2% conversion
-- Email: Reaches 5k people, costs $200, 5% conversion
-- Ads: Reaches 20k people, costs $1000, 1% conversion
-
-Budget: $1500
-Goal: Maximum customers
-
-Which strategy gets the most customers?
-A) Social Media + Email
-B) Social Media + Ads
-C) Email + Ads
-
-Type A, B, or C:"""
-
-        # A: 10k*0.02 + 5k*0.05 = 200 + 250 = 450
-        # B: 10k*0.02 + 20k*0.01 = 200 + 200 = 400
-        # C: 5k*0.05 + 20k*0.01 = 250 + 200 = 450
-
-        return Exercise(
-            id=str(uuid.uuid4()),
-            category='problem_solving',
-            type='strategy',
-            difficulty=difficulty,
-            question=question,
-            correct_answer='a',  # or C, both work
-            options=['A', 'B', 'C'],
-            time_limit_seconds=120,
-            hints=[
-                "Calculate customers per dollar",
-                "Compare total customers for each option",
-                "Check your math"
-            ]
-        )
-
-    def _multi_step(self, difficulty: int) -> Exercise:
-        """Generate multi-step problem"""
-
-        question = f"""Problem Solving - Multi-Step
-
-A company has these issues:
-1. Customer complaints increased 30%
-2. Response time doubled to 48 hours
-3. Support team shrunk from 10 to 6 people
-
-Which should be addressed FIRST?
-A) Hire more support staff
-B) Implement faster ticketing system
-C) Analyze complaint causes
-D) Train existing staff
-
-Type A, B, C, or D:"""
-
-        return Exercise(
-            id=str(uuid.uuid4()),
-            category='problem_solving',
-            type='multi_step',
-            difficulty=difficulty,
-            question=question,
-            correct_answer='c',  # Understand root cause first
-            options=['A', 'B', 'C', 'D'],
-            time_limit_seconds=90,
-            hints=[
-                "What gives you the most information?",
-                "Consider root cause analysis",
-                "Think about efficiency vs. effectiveness"
-            ]
-        )
 
     async def validate(self, correct_answer: Any, user_answer: Any) -> bool:
-        """Validate problem-solving answer"""
-        return str(user_answer).strip().lower() == str(correct_answer).strip().lower()
+        """Validate problem-solving answer using LLM for semantic understanding when available"""
+        
+        # If no LLM client, fall back to exact matching
+        if not self.client:
+            return str(user_answer).strip().lower() == str(correct_answer).strip().lower()
+        
+        # Use LLM for semantic validation
+        return await self._validate_llm_problem_solving_answer(correct_answer, user_answer)
+    
+    async def _validate_llm_problem_solving_answer(self, correct_answer: Any, user_answer: Any) -> bool:
+        """Validate problem-solving answer using LLM semantic understanding"""
+        
+        try:
+            # Create a validation prompt for LLM
+            validation_prompt = [{
+                'role': 'system',
+                'content': f"""You are a problem-solving exercise validator. Determine if the user's answer is logically correct for the given problem type.
+
+User's answer: "{user_answer}"
+Correct answer: "{correct_answer}"
+
+Evaluate if the user's answer is semantically equivalent or logically correct compared to the correct answer. Consider:
+1. Synonyms and alternative phrasings
+2. Logical correctness regardless of exact wording
+3. Case insensitivity
+4. Numerical answers with different formatting
+5. Strategic approaches that achieve the same outcome
+
+Respond with ONLY "correct" if the answer is logically correct, or "incorrect" if it's wrong."""
+            }]
+            
+            response = await self.client._make_request(
+                model=self.client.config.fallback_model,  # Use cheaper model for validation
+                messages=validation_prompt,
+                temperature=0.1,  # Low temperature for consistent validation
+                max_tokens=10
+            )
+            
+            result_text = response['choices'][0]['message']['content'].strip().lower()
+            
+            logger.debug(
+                "llm_problem_solving_validation_result",
+                user_answer=user_answer,
+                correct_answer=correct_answer,
+                llm_result=result_text
+            )
+            
+            return 'incorrect' not in result_text
+            
+        except Exception as e:
+            logger.warning(
+                "llm_problem_solving_validation_failed",
+                error=str(e),
+                falling_back_to_exact_match=True,
+                user_answer=user_answer,
+                correct_answer=correct_answer
+            )
+            # Fall back to exact matching if LLM validation fails
+            return str(user_answer).strip().lower() == str(correct_answer).strip().lower()
 
 
 class PatternRecognitionGenerator:

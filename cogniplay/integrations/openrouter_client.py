@@ -142,6 +142,76 @@ class OpenRouterClient:
 
         return self._parse_logic_exercise_response(response)
 
+    async def generate_problem_solving_exercise(
+        self,
+        problem_type: str,
+        difficulty: int
+    ) -> Dict[str, Any]:
+        """Generate problem-solving exercise using LLM"""
+
+        # Validate problem type
+        valid_problem_types = ['optimization', 'resource_allocation', 'strategy', 'multi-step']
+        if problem_type not in valid_problem_types:
+            raise ValueError(f"Invalid problem type: {problem_type}. Must be one of: {valid_problem_types}")
+
+        # Validate difficulty
+        if not isinstance(difficulty, int) or difficulty < 1 or difficulty > 5:
+            raise ValueError(f"Difficulty must be an integer between 1 and 5, got: {difficulty}")
+
+        prompt = self._build_problem_solving_prompt(
+            problem_type, difficulty
+        )
+
+        try:
+            response = await self._make_request(
+                model=self.config.primary_model,
+                messages=prompt,
+                temperature=0.8,
+                max_tokens=500
+            )
+
+            parsed_response = self._parse_problem_solving_response(response)
+
+            logger.info(
+                "problem_solving_exercise_generated",
+                problem_type=problem_type,
+                difficulty=difficulty,
+                tokens=response.get('usage', {}).get('total_tokens'),
+                model=self.config.primary_model
+            )
+
+            return parsed_response
+
+        except Exception as e:
+            logger.error(
+                "problem_solving_generation_failed",
+                error=str(e),
+                problem_type=problem_type,
+                difficulty=difficulty,
+                model=self.config.primary_model
+            )
+
+            # Fallback to simpler model
+            if self.config.primary_model != self.config.fallback_model:
+                logger.info("falling_back_to_backup_model_for_problem_solving")
+                try:
+                    response = await self._make_request(
+                        model=self.config.fallback_model,
+                        messages=prompt,
+                        temperature=0.8,
+                        max_tokens=500
+                    )
+                    return self._parse_problem_solving_response(response)
+                except Exception as fallback_error:
+                    logger.error(
+                        "fallback_model_also_failed",
+                        error=str(fallback_error),
+                        problem_type=problem_type,
+                        difficulty=difficulty
+                    )
+            
+            raise
+
     async def _make_request(
         self,
         model: str,
@@ -367,6 +437,119 @@ Format your response as JSON:
 }}"""
 
         return [{"role": "system", "content": system_prompt}]
+
+    def _build_problem_solving_prompt(
+        self,
+        problem_type: str,
+        difficulty: int
+    ) -> list:
+        """Build prompt for problem-solving exercise generation"""
+
+        difficulty_descriptions = {
+            1: "Simple, straightforward problem with clear constraints and obvious solutions",
+            2: "Moderate complexity with some competing factors and multiple approaches",
+            3: "Complex problem requiring analysis of multiple variables and trade-offs",
+            4: "Challenging scenario with limited information and conflicting priorities",
+            5: "Highly complex problem with time pressure, resource constraints, and multiple stakeholders"
+        }
+
+        type_specific_instructions = {
+            'optimization': """Create a business optimization problem focused on maximizing efficiency, minimizing costs, or optimizing resource usage.
+                            Include constraints, variables to optimize, and clear metrics for success.""",
+            'resource_allocation': """Create a resource allocation problem involving people, budget, time, or materials.
+                                    Include limited resources, competing demands, and allocation constraints.""",
+            'strategy': """Create a strategic decision-making problem requiring analysis of options, risks, and outcomes.
+                         Include multiple approaches with different pros and cons, and clear success criteria.""",
+            'multi-step': """Create a multi-step problem requiring sequential decision-making and dependency analysis.
+                           Include initial conditions, multiple decision points, and cascading consequences."""
+        }
+
+        system_prompt = f"""Generate a {problem_type} problem-solving exercise for cognitive training.
+
+Problem Type: {problem_type}
+Difficulty Level: {difficulty}/5 - {difficulty_descriptions.get(difficulty, '')}
+
+Specific Instructions:
+{type_specific_instructions.get(problem_type, 'Create an engaging business problem-solving scenario.')}
+
+Requirements:
+1. Create a realistic business/management scenario
+2. Include clear problem statement and context
+3. Provide 3-4 realistic solution options where appropriate
+4. Include a definitive correct answer or best approach
+5. Add 2-3 helpful hints that guide without giving away the answer
+6. Make it challenging but solvable based on the difficulty level
+7. Focus on practical business/management applications
+
+Format your response as JSON:
+{{
+  "scenario": "Detailed problem scenario with context",
+  "question": "The specific question to solve",
+  "options": ["option1", "option2", "option3", "option4"], // for multiple choice only
+  "correct_answer": "The correct answer or best approach",
+  "hints": ["hint1", "hint2", "hint3"],
+  "explanation": "Brief explanation of why this is the correct approach"
+}}"""
+
+        return [{"role": "system", "content": system_prompt}]
+
+    def _parse_problem_solving_response(self, response: Dict) -> Dict[str, Any]:
+        """Parse problem-solving exercise generation response"""
+
+        content = response['choices'][0]['message']['content']
+
+        try:
+            import json
+            import re
+
+            # Remove markdown code blocks if present
+            content = content.strip()
+
+            # Remove any text before the first { or [
+            json_start = content.find('{')
+            if json_start == -1:
+                json_start = content.find('[')
+            if json_start > 0:
+                content = content[json_start:]
+
+            # Remove any text after the last } or ]
+            json_end = content.rfind('}')
+            if json_end == -1:
+                json_end = content.rfind(']')
+            if json_end >= 0:
+                content = content[:json_end + 1]
+
+            # Remove any remaining markdown formatting
+            content = re.sub(r'```\w*\n?', '', content)
+
+            # Clean up common LLM JSON issues
+            # Remove JavaScript-style comments
+            content = re.sub(r'//.*?$', '', content, flags=re.MULTILINE)
+            # Remove trailing commas before closing brackets/braces
+            content = re.sub(r',(\s*[}\]])', r'\1', content)
+            # Fix common escaping issues
+            content = content.replace('\\n', ' ').replace('\\"', '"')
+            # Remove extra whitespace that might cause issues
+            content = re.sub(r'\s+', ' ', content).strip()
+
+            parsed_data = json.loads(content)
+
+            # Ensure all required fields are present with defaults
+            return {
+                'scenario': parsed_data.get('scenario', ''),
+                'question': parsed_data.get('question', ''),
+                'options': parsed_data.get('options'),
+                'correct_answer': parsed_data.get('correct_answer', ''),
+                'hints': parsed_data.get('hints', []),
+                'explanation': parsed_data.get('explanation', '')
+            }
+
+        except json.JSONDecodeError as e:
+            logger.error("problem_solving_parse_failed", content=content, error=str(e))
+            raise
+        except Exception as e:
+            logger.error("problem_solving_parse_error", content=content, error=str(e))
+            raise
 
     def _parse_logic_exercise_response(self, response: Dict) -> Dict[str, Any]:
         """Parse logic exercise generation response"""
