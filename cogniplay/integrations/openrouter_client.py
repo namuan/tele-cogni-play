@@ -122,6 +122,26 @@ class OpenRouterClient:
 
         return self._parse_scenario_response(response)
 
+    async def generate_logic_exercise(
+        self,
+        exercise_type: str,
+        difficulty: int
+    ) -> Dict[str, Any]:
+        """Generate logic exercise using LLM"""
+
+        prompt = self._build_logic_exercise_prompt(
+            exercise_type, difficulty
+        )
+
+        response = await self._make_request(
+            model=self.config.primary_model,
+            messages=prompt,
+            temperature=0.8,
+            max_tokens=400
+        )
+
+        return self._parse_logic_exercise_response(response)
+
     async def _make_request(
         self,
         model: str,
@@ -138,6 +158,16 @@ class OpenRouterClient:
             "max_tokens": max_tokens
         }
 
+        # Log the request payload for debugging
+        logger.info(
+            "openrouter_request",
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            message_count=len(messages),
+            request_body=payload
+        )
+
         for attempt in range(self.config.max_retries):
             try:
                 response = await self.client.post(
@@ -147,6 +177,15 @@ class OpenRouterClient:
                 response.raise_for_status()
 
                 data = response.json()
+                
+                # Log the full response for debugging
+                logger.info(
+                    "openrouter_response",
+                    status_code=response.status_code,
+                    response_body=data,
+                    attempt=attempt + 1
+                )
+                
                 self._track_usage(data)
 
                 return data
@@ -277,6 +316,102 @@ Format your response as JSON:
 }}"""
 
         return [{"role": "system", "content": system_prompt}]
+
+    def _build_logic_exercise_prompt(
+        self,
+        exercise_type: str,
+        difficulty: int
+    ) -> list:
+        """Build prompt for logic exercise generation"""
+
+        difficulty_descriptions = {
+            1: "Simple, straightforward logic with basic reasoning",
+            2: "Moderate complexity with some intermediate steps",
+            3: "Moderately complex logic requiring multiple steps",
+            4: "Challenging logic with multiple conditions and branches",
+            5: "Highly complex logic with advanced reasoning patterns"
+        }
+
+        type_specific_instructions = {
+            'syllogism': """Create a syllogism puzzle with 2-3 premises and a conclusion question.
+                          Example: 'All A are B. All B are C. Therefore... ?' """,
+            'deduction': """Create a deductive reasoning puzzle with clear clues and constraints.
+                          Include enough information to reach a definite answer.""",
+            'riddle': """Create an engaging riddle with clear clues that lead to a single answer.
+                       Make it challenging but solvable.""",
+            'grid_logic': """Create a grid-based logic puzzle with 2-3 categories and clear clues.
+                           Ensure it's solvable with the given information."""
+        }
+
+        system_prompt = f"""Generate a {exercise_type} logic exercise for cognitive training.
+
+Exercise Type: {exercise_type}
+Difficulty Level: {difficulty}/5 - {difficulty_descriptions.get(difficulty, '')}
+
+Specific Instructions:
+{type_specific_instructions.get(exercise_type, 'Create an engaging logic puzzle.')}
+
+Requirements:
+1. Create a clear, challenging but solvable puzzle
+2. Provide a definitive correct answer
+3. Include 2-3 helpful hints if applicable
+4. Set appropriate time limits based on difficulty
+5. For multiple choice questions, provide realistic but incorrect distractors
+
+Format your response as JSON:
+{{
+  "question": "The puzzle question with full context",
+  "answer": "The correct answer",
+  "options": ["option1", "option2", "option3"], // for multiple choice only
+  "hints": ["hint1", "hint2", "hint3"]
+}}"""
+
+        return [{"role": "system", "content": system_prompt}]
+
+    def _parse_logic_exercise_response(self, response: Dict) -> Dict[str, Any]:
+        """Parse logic exercise generation response"""
+
+        content = response['choices'][0]['message']['content']
+
+        try:
+            import json
+            import re
+
+            # Remove markdown code blocks if present
+            content = content.strip()
+
+            # Remove any text before the first { or [
+            json_start = content.find('{')
+            if json_start == -1:
+                json_start = content.find('[')
+            if json_start > 0:
+                content = content[json_start:]
+
+            # Remove any text after the last } or ]
+            json_end = content.rfind('}')
+            if json_end == -1:
+                json_end = content.rfind(']')
+            if json_end >= 0:
+                content = content[:json_end + 1]
+
+            # Remove any remaining markdown formatting
+            content = re.sub(r'```\w*\n?', '', content)
+
+            # Clean up common LLM JSON issues
+            # Remove JavaScript-style comments
+            content = re.sub(r'//.*?$', '', content, flags=re.MULTILINE)
+            # Remove trailing commas before closing brackets/braces
+            content = re.sub(r',(\s*[}\]])', r'\1', content)
+            # Fix common escaping issues
+            content = content.replace('\\n', ' ').replace('\\"', '"')
+            # Remove extra whitespace that might cause issues
+            content = re.sub(r'\s+', ' ', content).strip()
+
+            return json.loads(content)
+
+        except json.JSONDecodeError as e:
+            logger.error("logic_exercise_parse_failed", content=content, error=str(e))
+            raise
 
     def _parse_character_response(self, response: Dict) -> Dict[str, Any]:
         """Parse AI response into structured format"""

@@ -4,16 +4,18 @@ import structlog
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from cogniplay.data.models import Exercise, ExerciseResult
+from cogniplay.integrations.openrouter_client import OpenRouterClient
 
 logger = structlog.get_logger()
 
 class ExerciseEngine:
     """Generate and validate cognitive exercises"""
 
-    def __init__(self):
+    def __init__(self, openrouter_client=None):
+        self.client = openrouter_client
         self.generators = {
             'memory': MemoryExerciseGenerator(),
-            'logic': LogicExerciseGenerator(),
+            'logic': LogicExerciseGenerator(openrouter_client),
             'problem_solving': ProblemSolvingGenerator(),
             'pattern_recognition': PatternRecognitionGenerator(),
             'attention': AttentionExerciseGenerator()
@@ -72,7 +74,7 @@ class ExerciseEngine:
         """
 
         generator = self.generators[exercise.category]
-        is_correct = generator.validate(
+        is_correct = await generator.validate(
             exercise.correct_answer,
             user_answer
         )
@@ -290,7 +292,7 @@ Use ■ for filled squares and □ for empty squares."""
             ]
         )
 
-    def validate(self, correct_answer: Any, user_answer: Any) -> bool:
+    async def validate(self, correct_answer: Any, user_answer: Any) -> bool:
         """Validate memory exercise answer"""
 
         if isinstance(correct_answer, list):
@@ -306,20 +308,78 @@ Use ■ for filled squares and □ for empty squares."""
 
 
 class LogicExerciseGenerator:
-    """Generate logic puzzles"""
+    """Generate logic puzzles using LLM"""
+
+    def __init__(self, openrouter_client=None):
+        self.client = openrouter_client
 
     async def generate(self, difficulty: int) -> Exercise:
-        """Generate logic exercise"""
+        """Generate logic exercise using LLM"""
+
+        # If no LLM client, fall back to hardcoded generators
+        if not self.client:
+            exercise_types = [
+                self._syllogism,
+                self._deduction,
+                self._riddle,
+                self._grid_logic
+            ]
+            generator_func = random.choice(exercise_types)
+            return generator_func(difficulty)
+
+        # Use LLM to generate dynamic exercise
+        return await self._generate_llm_exercise(difficulty)
+
+    async def _generate_llm_exercise(self, difficulty: int) -> Exercise:
+        """Generate logic exercise using LLM"""
 
         exercise_types = [
-            self._syllogism,
-            self._deduction,
-            self._riddle,
-            self._grid_logic
+            "syllogism",
+            "deduction",
+            "riddle",
+            "grid_logic"
         ]
 
-        generator_func = random.choice(exercise_types)
-        return generator_func(difficulty)
+        exercise_type = random.choice(exercise_types)
+
+        try:
+            # Generate exercise via LLM
+            exercise_data = await self.client.generate_logic_exercise(
+                exercise_type,
+                difficulty
+            )
+
+            # Create Exercise object from LLM data
+            return Exercise(
+                id=str(uuid.uuid4()),
+                category='logic',
+                type=exercise_type,
+                difficulty=difficulty,
+                question=exercise_data['question'],
+                correct_answer=exercise_data['answer'],
+                options=exercise_data.get('options'),
+                time_limit_seconds=60 + difficulty * 15,
+                hints=exercise_data.get('hints', [
+                    "Think carefully about the logic",
+                    "Consider all possibilities",
+                    "Check your reasoning"
+                ])
+            )
+
+        except Exception as e:
+            logger.warning(
+                "llm_exercise_generation_failed",
+                error=str(e),
+                falling_back_to_hardcoded=True
+            )
+            # Fall back to hardcoded generator
+            fallback_methods = {
+                'syllogism': self._syllogism,
+                'deduction': self._deduction,
+                'riddle': self._riddle,
+                'grid_logic': self._grid_logic
+            }
+            return fallback_methods[exercise_type](difficulty)
 
     def _syllogism(self, difficulty: int) -> Exercise:
         """Generate syllogism puzzle"""
@@ -547,9 +607,65 @@ Type your answer (Red, Blue, or Green):"""
             ]
         )
 
-    def validate(self, correct_answer: Any, user_answer: Any) -> bool:
-        """Validate logic puzzle answer"""
-        return str(user_answer).strip().lower() == str(correct_answer).strip().lower()
+    async def validate(self, correct_answer: Any, user_answer: Any) -> bool:
+        """Validate logic puzzle answer using LLM for semantic understanding"""
+        
+        # If no LLM client, fall back to exact matching
+        if not self.client:
+            return str(user_answer).strip().lower() == str(correct_answer).strip().lower()
+        
+        # Use LLM for semantic validation
+        return await self._validate_llm_logic_answer(correct_answer, user_answer)
+    
+    async def _validate_llm_logic_answer(self, correct_answer: Any, user_answer: Any) -> bool:
+        """Validate logic answer using LLM semantic understanding"""
+        
+        try:
+            # Create a validation prompt for LLM
+            validation_prompt = [{
+                'role': 'system',
+                'content': f"""You are a logic puzzle validator. Determine if the user's answer is logically correct for the given question.
+
+User's answer: "{user_answer}"
+Correct answer: "{correct_answer}"
+
+Evaluate if the user's answer is semantically equivalent or logically correct compared to the correct answer. Consider:
+1. Synonyms and alternative phrasings
+2. Logical correctness regardless of exact wording
+3. Case insensitivity
+4. Common abbreviations or alternative forms
+
+Respond with ONLY "correct" if the answer is logically correct, or "incorrect" if it's wrong."""
+            }]
+            
+            response = await self.client._make_request(
+                model=self.client.config.fallback_model,  # Use cheaper model for validation
+                messages=validation_prompt,
+                temperature=0.1,  # Low temperature for consistent validation
+                max_tokens=10
+            )
+            
+            result_text = response['choices'][0]['message']['content'].strip().lower()
+            
+            logger.debug(
+                "llm_validation_result",
+                user_answer=user_answer,
+                correct_answer=correct_answer,
+                llm_result=result_text
+            )
+            
+            return 'incorrect' not in result_text
+            
+        except Exception as e:
+            logger.warning(
+                "llm_validation_failed",
+                error=str(e),
+                falling_back_to_exact_match=True,
+                user_answer=user_answer,
+                correct_answer=correct_answer
+            )
+            # Fall back to exact matching if LLM validation fails
+            return str(user_answer).strip().lower() == str(correct_answer).strip().lower()
 
 
 class ProblemSolvingGenerator:
@@ -729,7 +845,7 @@ Type A, B, C, or D:"""
             ]
         )
 
-    def validate(self, correct_answer: Any, user_answer: Any) -> bool:
+    async def validate(self, correct_answer: Any, user_answer: Any) -> bool:
         """Validate problem-solving answer"""
         return str(user_answer).strip().lower() == str(correct_answer).strip().lower()
 
@@ -885,7 +1001,7 @@ Type your answer:"""
             ]
         )
 
-    def validate(self, correct_answer: Any, user_answer: Any) -> bool:
+    async def validate(self, correct_answer: Any, user_answer: Any) -> bool:
         """Validate pattern recognition answer"""
         return str(user_answer).strip().lower() == str(correct_answer).strip().lower()
 
@@ -1016,7 +1132,7 @@ Type your answer (just the number):"""
             ]
         )
 
-    def validate(self, correct_answer: Any, user_answer: Any) -> bool:
+    async def validate(self, correct_answer: Any, user_answer: Any) -> bool:
         """Validate attention exercise answer"""
         # For information filtering, check if key terms are present
         if isinstance(correct_answer, str) and ',' in correct_answer:
@@ -1027,3 +1143,4 @@ Type your answer (just the number):"""
             return matches >= 2
 
         return str(user_answer).strip().lower() == str(correct_answer).strip().lower()
+

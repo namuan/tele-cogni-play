@@ -30,7 +30,7 @@ from cogniplay.data.repositories import (
 )
 
 # Set up comprehensive logging with file output and stack traces
-setup_comprehensive_logging(log_level="DEBUG", log_file="cogniplay_debug.log")
+# This will be initialized after settings are loaded in main()
 logger = structlog.get_logger()
 
 # Conversation states
@@ -73,7 +73,7 @@ class CogniPlayBot:
             self.openrouter_client,
             self.character_repo
         )
-        self.exercise_engine = ExerciseEngine()
+        self.exercise_engine = ExerciseEngine(self.openrouter_client)
         self.scenario_engine = ScenarioEngine(
             self.openrouter_client,
             self.character_gen
@@ -1265,6 +1265,9 @@ def main():
 
     # Load settings
     settings = Settings()
+    
+    # Initialize logging with settings
+    setup_comprehensive_logging(log_level=settings.log_level, log_file="cogniplay_debug.log")
 
     # Initialize and run bot
     bot = CogniPlayBot(settings)
