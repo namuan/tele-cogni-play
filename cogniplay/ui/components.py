@@ -56,14 +56,45 @@ def scenario_type_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 
+def _summarize_action_label(action: str, max_len: int = 18) -> str:
+    """Create a short, verb-first label for an action.
+
+    Heuristic:
+    - Take the first clause up to punctuation.
+    - Keep the first 2–4 words, trimmed to max_len.
+    - Prefer not to append ellipsis on the button; full text will appear in the message body.
+    """
+    if not action:
+        return "Option"
+    # Split on common punctuation to get the first clause
+    clause = action.split(";")[0].split(".")[0].split(":")[0].split("–")[0].split("-")[0]
+    words = clause.strip().split()
+    if not words:
+        words = action.strip().split()
+    # Keep first few words to form a concise label
+    short = " ".join(words[:4])
+    # Trim to max length without breaking mid-word if possible
+    if len(short) > max_len:
+        short = short[:max_len].rstrip()
+    return short
+
+
+def format_actions_list(actions: List[str]) -> str:
+    """Return a numbered list of full action texts for inclusion in the message body."""
+    lines = [f"{i+1}. {a}" for i, a in enumerate(actions[:3])]
+    return "\n".join(lines)
+
+
 def scenario_action_keyboard(actions: List[str], include_custom: bool = True) -> InlineKeyboardMarkup:
     """Build the scenario actions keyboard from a list of action strings.
 
+    Uses short, verb-like labels on buttons and shows full text in the message body.
     Shows up to 3 actions (to match current UX), plus optional custom action.
     """
     keyboard = []
     for i, action in enumerate(actions[:3]):
-        label = f"{i+1}. {action[:50]}..."
+        summary = _summarize_action_label(action)
+        label = f"{i+1}. {summary}"
         keyboard.append([InlineKeyboardButton(label, callback_data=f"action_{i}")])
     if include_custom:
         keyboard.append([InlineKeyboardButton("✍️ Custom Action", callback_data='custom_action')])

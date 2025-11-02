@@ -30,7 +30,7 @@ def setup_comprehensive_logging(log_level: str = "DEBUG", log_file: str = "cogni
             logging.handlers.RotatingFileHandler(
                 log_file_path,
                 maxBytes=10*1024*1024,  # 10MB
-                backupCount=5
+                backupCount=0
             )
         ]
     )
@@ -58,16 +58,18 @@ def setup_comprehensive_logging(log_level: str = "DEBUG", log_file: str = "cogni
     # Configure structlog
     structlog.configure(
         processors=[
+            structlog.stdlib.filter_by_level,
+            structlog.stdlib.add_logger_name,
+            structlog.stdlib.add_log_level,
+            structlog.stdlib.PositionalArgumentsFormatter(),
             structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.add_log_level,
             add_context_info,
             add_stack_trace,
-            structlog.processors.JSONRenderer()
+            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],
-        wrapper_class=structlog.make_filtering_bound_logger(
-            getattr(logging, log_level.upper())
-        ),
-        logger_factory=structlog.WriteLoggerFactory(),
+        context_class=dict,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        wrapper_class=structlog.stdlib.BoundLogger,
         cache_logger_on_first_use=True,
     )
 

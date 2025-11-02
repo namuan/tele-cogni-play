@@ -28,6 +28,7 @@ from cogniplay.ui.components import (
     scenario_action_keyboard,
     error_main_menu_text,
     format_scenario_intro as ui_format_scenario_intro,
+    format_actions_list,
 )
 from cogniplay.data.repositories import (
     UserRepository,
@@ -400,8 +401,11 @@ Choose a scenario type:"""
 
             # Format scenario introduction
             text = self._format_scenario_intro(scenario)
+            # Append full numbered options under the intro
+            if scenario.get('available_actions'):
+                text += "\n\nOptions:\n" + format_actions_list(scenario['available_actions'])
 
-            # Create action buttons
+            # Create action buttons with concise labels
             reply_markup = scenario_action_keyboard(scenario['available_actions'], include_custom=True)
 
             await query.message.edit_text(text, reply_markup=reply_markup)
@@ -552,12 +556,6 @@ Choose a scenario type:"""
                         next_actions_count=len(next_actions) if next_actions else 0,
                         next_actions_type=type(next_actions).__name__
                     )
-                    
-                    for i, action in enumerate(next_actions[:3]):
-                        keyboard.append([InlineKeyboardButton(
-                            f"{i+1}. {action[:50]}...",
-                            callback_data=f"action_{i}"
-                        )])
                 except Exception as e:
                     logger.error(
                         "next_actions_access_failed",
@@ -567,8 +565,14 @@ Choose a scenario type:"""
                     )
                     # Fallback: create empty actions list
                     next_actions = []
-                
-                keyboard.append([InlineKeyboardButton("✍️ Custom Action", callback_data='custom_action')])
+
+                # Append full numbered options to the message
+                if next_actions:
+                    text += "\n\nOptions:\n" + format_actions_list(next_actions)
+
+                # Build concise-labeled keyboard and add End button
+                markup = scenario_action_keyboard(next_actions, include_custom=True)
+                keyboard = [list(row) for row in markup.inline_keyboard]
                 keyboard.append([InlineKeyboardButton("🛑 End Scenario", callback_data='end_scenario')])
 
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -681,12 +685,6 @@ Choose a scenario type:"""
                         next_actions_count=len(next_actions) if next_actions else 0,
                         next_actions_type=type(next_actions).__name__
                     )
-                    
-                    for i, action in enumerate(next_actions[:3]):
-                        keyboard.append([InlineKeyboardButton(
-                            f"{i+1}. {action[:50]}...",
-                            callback_data=f"action_{i}"
-                        )])
                 except Exception as e:
                     logger.error(
                         "custom_next_actions_access_failed",
@@ -696,8 +694,14 @@ Choose a scenario type:"""
                     )
                     # Fallback: create empty actions list
                     next_actions = []
-                
-                keyboard.append([InlineKeyboardButton("✍️ Custom Action", callback_data='custom_action')])
+
+                # Append full numbered options to the message
+                if next_actions:
+                    text += "\n\nOptions:\n" + format_actions_list(next_actions)
+
+                # Build concise-labeled keyboard and add End button
+                markup = scenario_action_keyboard(next_actions, include_custom=True)
+                keyboard = [list(row) for row in markup.inline_keyboard]
                 keyboard.append([InlineKeyboardButton("🛑 End Scenario", callback_data='end_scenario')])
 
             reply_markup = InlineKeyboardMarkup(keyboard)
