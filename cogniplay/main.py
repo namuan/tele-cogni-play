@@ -20,6 +20,15 @@ from cogniplay.engines.scenario_engine import ScenarioEngine
 from cogniplay.core.training_manager import TrainingManager
 from cogniplay.core.analytics_manager import AnalyticsManager
 from cogniplay.core.difficulty_engine import DifficultyAdjustmentEngine
+from cogniplay.ui.components import (
+    main_menu_keyboard,
+    training_menu_keyboard,
+    exercise_category_keyboard,
+    scenario_type_keyboard,
+    scenario_action_keyboard,
+    error_main_menu_text,
+    format_scenario_intro as ui_format_scenario_intro,
+)
 from cogniplay.data.repositories import (
     UserRepository,
     SessionRepository,
@@ -127,13 +136,7 @@ Total Sessions: {user_profile['total_sessions']}
 
 What would you like to do?"""
 
-        keyboard = [
-            [InlineKeyboardButton("🎯 Start Training", callback_data='train')],
-            [InlineKeyboardButton("📊 View Progress", callback_data='progress')],
-            [InlineKeyboardButton("⚙️ Settings", callback_data='settings')],
-            [InlineKeyboardButton("❓ Help", callback_data='help')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = main_menu_keyboard()
 
         await update.message.reply_text(welcome_text, reply_markup=reply_markup)
 
@@ -163,13 +166,7 @@ Choose your training mode:
 2️⃣ Role-Playing Scenarios - Interactive AI character scenarios
 3️⃣ Full Session - Both exercises and scenarios"""
 
-        keyboard = [
-            [InlineKeyboardButton("🧩 Cognitive Exercises", callback_data='mode_exercise')],
-            [InlineKeyboardButton("🎭 Role-Playing Scenarios", callback_data='mode_scenario')],
-            [InlineKeyboardButton("🎯 Full Session", callback_data='mode_full')],
-            [InlineKeyboardButton("« Back", callback_data='back_main')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = training_menu_keyboard()
 
         if query:
             await message.edit_text(text, reply_markup=reply_markup)
@@ -197,16 +194,7 @@ Choose your training mode:
 
 Choose a category:"""
 
-        keyboard = [
-            [InlineKeyboardButton("🧠 Memory Games", callback_data='cat_memory')],
-            [InlineKeyboardButton("🔍 Logic Puzzles", callback_data='cat_logic')],
-            [InlineKeyboardButton("💡 Problem Solving", callback_data='cat_problem_solving')],
-            [InlineKeyboardButton("🎨 Pattern Recognition", callback_data='cat_pattern_recognition')],
-            [InlineKeyboardButton("👁️ Attention Tasks", callback_data='cat_attention')],
-            [InlineKeyboardButton("🎲 Random", callback_data='cat_random')],
-            [InlineKeyboardButton("« Back", callback_data='back_train')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = exercise_category_keyboard()
 
         await query.message.edit_text(text, reply_markup=reply_markup)
 
@@ -367,15 +355,7 @@ Correct answer: {exercise.correct_answer}"""
 
 Choose a scenario type:"""
 
-        keyboard = [
-            [InlineKeyboardButton("🤝 Negotiation", callback_data='scen_negotiation')],
-            [InlineKeyboardButton("🔧 Problem Solving", callback_data='scen_problem_solving')],
-            [InlineKeyboardButton("💬 Social Interaction", callback_data='scen_social_interaction')],
-            [InlineKeyboardButton("👔 Leadership", callback_data='scen_leadership')],
-            [InlineKeyboardButton("💡 Creative Thinking", callback_data='scen_creative_thinking')],
-            [InlineKeyboardButton("« Back", callback_data='back_train')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = scenario_type_keyboard()
 
         await query.message.edit_text(text, reply_markup=reply_markup)
 
@@ -422,15 +402,7 @@ Choose a scenario type:"""
             text = self._format_scenario_intro(scenario)
 
             # Create action buttons
-            keyboard = []
-            for i, action in enumerate(scenario['available_actions'][:3]):  # Max 3 options
-                keyboard.append([InlineKeyboardButton(
-                    f"{i+1}. {action[:50]}...",
-                    callback_data=f"action_{i}"
-                )])
-            keyboard.append([InlineKeyboardButton("✍️ Custom Action", callback_data='custom_action')])
-
-            reply_markup = InlineKeyboardMarkup(keyboard)
+            reply_markup = scenario_action_keyboard(scenario['available_actions'], include_custom=True)
 
             await query.message.edit_text(text, reply_markup=reply_markup)
 
@@ -438,33 +410,20 @@ Choose a scenario type:"""
 
         except Exception as e:
             logger.error("scenario_creation_failed", error=str(e))
-            await query.message.edit_text(
-                "❌ Failed to create scenario. Please try again."
-            )
+            # Inform user and present main menu again
+            text = error_main_menu_text("❌ Failed to create scenario. Please try again.")
+            reply_markup = main_menu_keyboard(show_settings=False)
+            await query.message.edit_text(text, reply_markup=reply_markup)
             return MAIN_MENU
 
     def _format_scenario_intro(self, scenario) -> str:
-        """Format scenario introduction"""
-
-        characters_text = "\n".join([
-            f"• {char['name']} - {char['role']}"
-            for char in scenario['characters']
-        ])
-
-        text = f"""🎬 {scenario['title']}
-
-📖 Context:
-{scenario['context']}
-
-👥 Characters:
-{characters_text}
-
-🎭 Situation:
-{scenario['initial_situation']}
-
-What do you do?"""
-
-        return text
+        """Format scenario introduction (delegates to shared UI helper)"""
+        return ui_format_scenario_intro(
+            title=scenario['title'],
+            context=scenario['context'],
+            characters=scenario['characters'],
+            initial_situation=scenario['initial_situation'],
+        )
 
     async def handle_scenario_decision(
         self,
