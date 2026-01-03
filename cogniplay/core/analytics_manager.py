@@ -61,7 +61,7 @@ class AnalyticsManager:
     async def generate_progress_report(
         self,
         user_id: int,
-        days: int = 30
+        days: Optional[int] = 30
     ) -> ProgressReport:
         """Generate progress report for specified period"""
 

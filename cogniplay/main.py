@@ -114,13 +114,24 @@ class CogniPlayBot:
         update: Update,
         context: ContextTypes.DEFAULT_TYPE
     ) -> int:
-        """Handle /start command"""
+        """Handle /start command or callback"""
 
         user = update.effective_user
 
+        # Handle both message and callback_query
+        query = update.callback_query
+        if query:
+            await query.answer()
+            message = query.message
+        else:
+            message = update.message
+
+        if not message:
+            return ConversationHandler.END
+
         # Check if authorized user
         if user.id != self.settings.telegram_user_id:
-            await update.message.reply_text(
+            await message.reply_text(
                 "⛔ Sorry, this bot is private and not available for your use."
             )
             return ConversationHandler.END
@@ -139,7 +150,7 @@ What would you like to do?"""
 
         reply_markup = main_menu_keyboard()
 
-        await update.message.reply_text(welcome_text, reply_markup=reply_markup)
+        await message.reply_text(welcome_text, reply_markup=reply_markup)
 
         logger.info("user_started_bot", user_id=user.id)
 
@@ -979,7 +990,7 @@ View detailed analytics on your improvement over time. Get personalized recommen
 
 ⚙️ <b>Adaptive Difficulty</b>
 • 3 successes (≥90%) → Level up
-• 3 failures (<50%) → Level down
+• 3 failures (&lt;50%) → Level down
 • 5 difficulty levels (1-5)
 
 <b>Tips for Success:</b>

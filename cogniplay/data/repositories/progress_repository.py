@@ -93,10 +93,13 @@ class ProgressRepository:
             score=outcome.decision_quality
         )
 
-    async def get_progress_by_period(self, user_id: int, days: int) -> List[Dict[str, Any]]:
+    async def get_progress_by_period(self, user_id: int, days: Optional[int]) -> List[Dict[str, Any]]:
         """Get progress data for the specified period"""
 
-        start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+        if days is None:
+            start_date = '1970-01-01'  # All time
+        else:
+            start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
 
         rows = self.db.fetchall(
             """
@@ -124,10 +127,13 @@ class ProgressRepository:
             } for row in rows
         ]
 
-    async def get_category_performance(self, user_id: int, days: int = 30) -> Dict[str, Any]:
+    async def get_category_performance(self, user_id: int, days: Optional[int] = 30) -> Dict[str, Any]:
         """Get performance breakdown by category"""
 
-        start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+        if days is None:
+            start_date = '1970-01-01'  # All time
+        else:
+            start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
 
         # Exercise performance by category
         exercise_stats = self.db.fetchall(
@@ -254,10 +260,13 @@ class ProgressRepository:
 
         return [self._scenario_result_to_dict(row) for row in rows]
 
-    async def get_performance_trends(self, user_id: int, days: int = 30) -> Dict[str, Any]:
+    async def get_performance_trends(self, user_id: int, days: Optional[int] = 30) -> Dict[str, Any]:
         """Calculate performance trends over time"""
 
-        start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+        if days is None:
+            start_date = '1970-01-01'  # All time
+        else:
+            start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
 
         # Daily exercise scores
         exercise_trend = self.db.fetchall(
@@ -296,10 +305,13 @@ class ProgressRepository:
             ]
         }
 
-    async def get_weakest_areas(self, user_id: int, days: int = 14) -> List[Dict[str, Any]]:
+    async def get_weakest_areas(self, user_id: int, days: Optional[int] = 14) -> List[Dict[str, Any]]:
         """Identify weakest performing areas"""
 
-        start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+        if days is None:
+            start_date = '1970-01-01'  # All time
+        else:
+            start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
 
         # Exercise categories by average score (lowest first)
         weak_exercises = self.db.fetchall(
