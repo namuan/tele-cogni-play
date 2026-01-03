@@ -3,11 +3,10 @@ export PROJECTNAME=$(shell basename "$(PWD)")
 .SILENT: ;               # no need for @
 
 setup: ## Setup Virtual Env
-	python3 -m venv venv
-	./venv/bin/pip3 install -r requirements.txt
+	uv sync
 
 deps: ## Install dependencies
-	./venv/bin/pip3 install -r requirements.txt
+	uv sync
 
 clean: ## Clean package
 	find . -type d -name '__pycache__' | xargs rm -rf
@@ -19,7 +18,8 @@ deploy: clean ## Copies any changed file to the server
 		.env \
 		cogniplay \
 		scripts \
-		requirements.txt \
+		pyproject.toml \
+		uv.lock \
 		${PROJECTNAME}:./tele-cogni-play
 
 start: deploy ## Sets up a screen session on the server and start the app
@@ -32,7 +32,7 @@ ssh: ## SSH into the target VM
 	ssh ${PROJECTNAME}
 
 run: ## Run bot locally
-	./venv/bin/python3 -m cogniplay.main
+	uv run python -m cogniplay.main
 
 .PHONY: help
 .DEFAULT_GOAL := help

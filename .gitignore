@@ -17,3 +17,5 @@ __pycache__/
 !requirements.txt
 !.env.example
 !main.py
+!pyproject.toml
+!uv.lock

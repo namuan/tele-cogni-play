@@ -50,32 +50,31 @@ make stop
 ### Manual Installation
 
 1. **Clone the repository:**
-   ```bash
-   git clone <repository-url>
-   cd tele-cogni-play
-   ```
+    ```bash
+    git clone <repository-url>
+    cd tele-cogni-play
+    ```
 
-2. **Create virtual environment:**
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
+2. **Install uv (if not already installed):**
+    ```bash
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    ```
 
 3. **Install dependencies:**
-   ```bash
-   venv/bin/pip3 install -r requirements.txt
-   ```
+    ```bash
+    uv sync
+    ```
 
 4. **Configure environment:**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your API keys and settings
-   ```
+    ```bash
+    cp .env.example .env
+    # Edit .env with your API keys and settings
+    ```
 
 5. **Run the bot:**
-   ```bash
-   ./venv/bin/python3 -m cogniplay.main
-   ```
+    ```bash
+    uv run python -m cogniplay.main
+    ```
 
 ## Configuration
 
@@ -148,8 +147,8 @@ make ssh
 The deployment uses screen sessions for persistent running:
 
 - **Screen session name:** `tele-cogni-play`
-- **Virtual environment:** `venv` in project root
-- **Python executable:** `venv/bin/python3 -m cogniplay.main`
+- **Package manager:** `uv` (dependencies managed via pyproject.toml and uv.lock)
+- **Python executable:** `uv run python -m cogniplay.main`
 
 ## Contributing
 
